@@ -39,6 +39,11 @@
 
 ## 2. Каталоги та WSL
 
+Репозиторій проєкту є окремим Git-репозиторієм усередині каталогу робочої
+копії Google. Спочатку ініціалізуйте робочу копію Google, а потім клонуйте цей
+проєкт. Скрипти запускають із кореня робочої копії без параметрів і змінних
+середовища:
+
 ```bash
 KERNEL_CHECKOUT="$HOME/dev/cheetah-kernel"
 PROJECT="$KERNEL_CHECKOUT/ksun-susfs"
@@ -72,6 +77,13 @@ cd "$KERNEL_CHECKOUT"
 repo init -u https://android.googlesource.com/kernel/manifest \
   -b common-android14-6.1 --depth=1
 repo sync -c --no-tags -j"$(nproc)"
+```
+
+Після завершення `repo init` і `repo sync` клонуйте цей проєкт у робочу копію.
+Якщо `$PROJECT` уже існує, не клонуйте його повторно:
+
+```bash
+git clone https://github.com/osidius-the-emphatic/cheetah-ksun-susfs.git "$PROJECT"
 ```
 
 Спочатку запишіть версію ядра, що зараз працює на телефоні:
