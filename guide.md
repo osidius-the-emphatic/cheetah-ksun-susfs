@@ -42,8 +42,9 @@ Download the factory image for the exact build installed on the phone. Keep boot
 
 ## 2. Choose directories and open WSL
 
-The project repository and Google repo checkout are separate. Run the scripts
-from the checkout root and they need no arguments or exported variables:
+The project repository is a separate Git repository inside the Google checkout
+directory. Initialize the Google checkout before cloning this project. Run the
+scripts from the checkout root and they need no arguments or exported variables:
 
 ```bash
 KERNEL_CHECKOUT="$HOME/dev/cheetah-kernel"
@@ -80,6 +81,13 @@ cd "$KERNEL_CHECKOUT"
 repo init -u https://android.googlesource.com/kernel/manifest \
   -b common-android14-6.1 --depth=1
 repo sync -c --no-tags -j"$(nproc)"
+```
+
+After `repo init` and `repo sync` finish, clone this project into the checkout.
+If `$PROJECT` already exists, do not clone it again:
+
+```bash
+git clone https://github.com/osidius-the-emphatic/cheetah-ksun-susfs.git "$PROJECT"
 ```
 
 First record the release running on the phone:
