@@ -14,7 +14,7 @@
 - KernelSU-Next: pershoot/KernelSU-Next, `dev-susfs`.
 - SuSFS: pershoot/susfs4ksu, `gki-android14-6.1-dev`.
 
-URL, гілки та необов’язкові закріплені коміти зберігаються в `config/versions.env`.
+URL, гілки та закріплені коміти зберігаються в `config/versions.env`.
 
 ## Ліцензія та походження
 

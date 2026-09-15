@@ -31,8 +31,8 @@ jobs:
           done
           for name in GOOGLE_BASE_COMMIT SUSFS_EXPECTED_COMMIT KSUN_EXPECTED_COMMIT; do
             value="${!name}"
-            [[ -z "$value" || "$value" =~ ^[0-9a-f]{40}$ ]] || {
-              echo "$name must be empty or a lowercase 40-character Git commit ID" >&2
+            [[ "$value" =~ ^[0-9a-f]{40}$ ]] || {
+              echo "$name must be a lowercase 40-character Git commit ID" >&2
               exit 1
             }
           done
