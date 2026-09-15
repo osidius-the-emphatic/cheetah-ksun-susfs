@@ -1,0 +1,33 @@
+Third-party provenance and notices
+==================================
+
+This repository is a workflow for integrating separately obtained source
+trees. It does not distribute a complete Google kernel source tree, factory
+image, KernelSU-Next source tree, or SuSFS source tree.
+
+Google kernel source
+--------------------
+
+The workflow targets the Android 14 / Linux 6.1 GKI source obtained through
+https://android.googlesource.com/kernel/manifest using the
+common-android14-6.1 manifest branch. The device-matched common/ commit is
+set in config/versions.env before a build. Google and Linux kernel copyright
+and license notices remain applicable to that source tree and any resulting
+derivative kernel image.
+
+KernelSU-Next and SuSFS
+-----------------------
+
+build_ksu_next_susfs.sh obtains KernelSU-Next from
+https://github.com/pershoot/KernelSU-Next , branch dev-susfs, and SuSFS from
+https://gitlab.com/pershoot/susfs4ksu , branch gki-android14-6.1-dev. The
+selected commits are recorded in the build proof and can be pinned in
+config/versions.env after a reviewed successful build. Preserve their
+upstream copyright notices and licenses when redistributing derived material.
+
+Local integration logic
+-----------------------
+
+The repository's shell scripts and workflow configuration implement the
+Pixel 7 Pro integration procedure. They are GPL-2.0-only unless a retained
+upstream notice requires additional terms.

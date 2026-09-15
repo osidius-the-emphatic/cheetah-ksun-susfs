@@ -30,6 +30,13 @@ The exact branch names and optional commit pins are stored in
 `config/versions.env`. The SuSFS patch is taken from the checked-out upstream
 tree rather than from an opaque archive.
 
+## Licensing and provenance
+
+Executable material and original integration logic are `GPL-2.0-only`; the
+README and guide documentation are `CC-BY-4.0`. Google, KernelSU-Next, and
+SuSFS sources are obtained separately and retain their upstream notices and
+terms. See [LICENSE](LICENSE) for scope and [NOTICE](NOTICE) for provenance.
+
 ## Inputs
 
 - Pixel 7 Pro Android 14 GKI checkout containing `common/`, `build/`, and `tools/bazel`.
@@ -56,5 +63,5 @@ The package script creates a new directory below `repacked-images/` containing
 5. Flash manually only after a stable test; keep stock `boot.img` and
    `init_boot.img` for recovery.
 
-See [guide.md](guide.md) for the complete procedure, troubleshooting, update
-rules, and handoff notes.
+See [guide.md](guide.md) for the complete procedure, troubleshooting, and
+update rules.

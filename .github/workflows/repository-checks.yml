@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: GPL-2.0-only
+name: Repository checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate scripts and version configuration
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash -n build_ksu_next_susfs.sh
+          bash -n package_kernel_image.sh
+
+          source config/versions.env
+          for name in SUSFS_REPO SUSFS_BRANCH KSUN_REPO KSUN_BRANCH; do
+            [[ -n "${!name}" ]] || {
+              echo "$name must not be empty" >&2
+              exit 1
+            }
+          done
+          for name in GOOGLE_BASE_COMMIT SUSFS_EXPECTED_COMMIT KSUN_EXPECTED_COMMIT; do
+            value="${!name}"
+            [[ -z "$value" || "$value" =~ ^[0-9a-f]{40}$ ]] || {
+              echo "$name must be empty or a lowercase 40-character Git commit ID" >&2
+              exit 1
+            }
+          done
+
+          grep -Fxq 'Repository licensing policy' LICENSE
+          grep -Fxq 'Third-party provenance and notices' NOTICE
