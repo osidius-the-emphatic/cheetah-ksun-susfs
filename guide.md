@@ -24,7 +24,7 @@ This workflow uses built-in KernelSU-Next. init_boot.img is not patched by the p
 | --- | --- |
 | build_ksu_next_susfs.sh | Fetches integration sources, applies SuSFS, links KernelSU-Next, runs Kleaf, and writes proof. |
 | package_kernel_image.sh | Replaces the kernel in stock boot.img and writes a new package directory. |
-| config/versions.env | Upstream URLs, branches, and optional expected commit pins. |
+| config/versions.env | Upstream URLs, branches, and pinned commits. |
 | README.md / guide.md | Canonical project documentation. |
 | `$KERNEL_CHECKOUT/common/` | Google kernel source modified by the build script. |
 | `$KERNEL_CHECKOUT/out/android-msm-cheetah-6.1/` | Default Kleaf dist directory; not tracked. |
@@ -106,11 +106,13 @@ if git rev-parse --is-shallow-repository | grep -qx true; then
 fi
 ```
 
-On Google GKI builds the release normally includes an abbreviated Git commit
-after `-g`, for example `...-gbd23337e42e7-...`. “Pin `common/`” means check
-out the matching source commit in the local `common/` Git repository; it does
-not mean merely selecting the `common-android14-6.1` branch. Confirm that the
-commit exists locally, then create or move a local working branch to it:
+The matching Pixel 7 Pro `boot.img` kernel payload inspected on 2026-09-15 embeds the
+release `6.1.157-android14-11-gbd23337e42e7-ab14791245`. Its `-g` suffix
+resolves to `bd23337e42e794964a89f47596daf1209a25ee1a`, which is the pinned
+Google base in this repository. “Pin `common/`” means check out that exact
+source commit in the local `common/` Git repository; it does not mean merely
+selecting the `common-android14-6.1` branch. Confirm that the commit exists
+locally, then create or move a local working branch to it:
 
 ```bash
 cd "$KERNEL_CHECKOUT/common"
@@ -120,12 +122,12 @@ git log -1 --oneline
 git status --short
 ```
 
-Replace `bd23337e42e7` with the commit abbreviation from the device. Record
-the resolved full SHA in `config/versions.env` as `GOOGLE_BASE_COMMIT=...`. If no
-matching commit is found, stop: fetch the correct Google source history or
-identify the matching factory/kernel revision before integrating anything.
-Finally confirm that `$KERNEL_CHECKOUT/common`, `$KERNEL_CHECKOUT/build`, and
-`$KERNEL_CHECKOUT/tools/bazel` exist.
+For another factory image or a later OTA, replace `bd23337e42e7` with the
+device's `-g` suffix and record the resolved full SHA in `config/versions.env`
+as `GOOGLE_BASE_COMMIT=...`. If no matching commit is found, stop: fetch the
+correct Google source history or identify the matching factory/kernel revision
+before integrating anything. Finally confirm that `$KERNEL_CHECKOUT/common`,
+`$KERNEL_CHECKOUT/build`, and `$KERNEL_CHECKOUT/tools/bazel` exist.
 
 ### Repeat a build with an existing checkout
 
@@ -202,15 +204,13 @@ source "$VERSIONS_FILE"
 ```
 
 It uses `SUSFS_REPO`, `SUSFS_BRANCH`, `KSUN_REPO`, and `KSUN_BRANCH` from that
-file to fetch the configured branches. Optional
-`SUSFS_EXPECTED_COMMIT` and `KSUN_EXPECTED_COMMIT` values make a validated
-build reproducible and stop when a branch tip no longer matches the pin.
-For the first build, do not change the repository URLs, branches, or the two
-optional expected-commit fields in `config/versions.env`; those expected-commit
-fields should remain blank until a successful build has been reviewed. The
-target device's source commit comes from `adb shell uname -r`; record it in
-`config/versions.env` as `GOOGLE_BASE_COMMIT` before the build. There is no
-separate `KERNEL_COMMIT` variable.
+file to fetch the configured branches. The pinned `SUSFS_EXPECTED_COMMIT` and
+`KSUN_EXPECTED_COMMIT` values stop when a branch tip no longer matches the
+reviewed snapshot. `GOOGLE_BASE_COMMIT` is already matched to the boot image's
+kernel payload named above. For another device image, verify its `adb shell uname -r` suffix
+before the build. If it differs, stop; do not substitute a different Google
+commit while retaining the current integration pins. There is no separate
+`KERNEL_COMMIT` variable.
 
 The script then copies the SuSFS patch files into `common/`, applies the
 version-specific patch, links `common/drivers/kernelsu`, removes the
@@ -384,9 +384,12 @@ same way regardless of the current directory. Inspect it with:
 sed -n '1,120p' "$PROJECT/config/versions.env"
 ```
 
-Optional expected commit variables make a validated build reproducible and
-prevent silently applying a patch to a different upstream revision. Leave them
-blank until a known-good build has been reviewed, then record exact SHAs.
+Pinned commit variables make the selected source snapshot reproducible and
+prevent silently applying a patch to a different upstream revision. The Google
+base pin is matched to the documented boot image's kernel payload; it does not by itself prove
+that the current SuSFS/KernelSU-Next pins build, preserve ABI, or boot. Refresh
+the integration pins only after reviewing the candidate source and completing a
+clean build with its proof.
 
 ## 14. Troubleshooting
 
