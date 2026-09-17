@@ -96,6 +96,18 @@ First record the release running on the phone:
 adb shell uname -r
 ```
 
+If the phone cannot boot the matching stock release yet, inspect its factory
+`boot.img` instead. Run the following in an empty temporary directory because
+`magiskboot unpack` writes a local `kernel` file:
+
+```bash
+magiskboot unpack "$STOCK_IMAGES/boot.img"
+strings kernel | grep -m1 "Linux version"
+```
+
+Use the `-g` suffix from either release string to identify the Google source
+commit.
+
 Because `repo init --depth=1` creates a shallow `common/` repository, extend
 its history before looking up an older commit. This step may require network:
 

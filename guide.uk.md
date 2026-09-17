@@ -92,6 +92,18 @@ git clone https://github.com/osidius-the-emphatic/cheetah-ksun-susfs.git "$PROJE
 adb shell uname -r
 ```
 
+Якщо телефон ще не може завантажити відповідний stock release, натомість
+перевірте його factory `boot.img`. Виконуйте наступне в порожньому тимчасовому
+каталозі, бо `magiskboot unpack` записує локальний файл `kernel`:
+
+```bash
+magiskboot unpack "$STOCK_IMAGES/boot.img"
+strings kernel | grep -m1 "Linux version"
+```
+
+Використайте суфікс `-g` з будь-якого з цих release strings, щоб визначити
+коміт вихідного коду Google.
+
 Оскільки `repo init --depth=1` створює неповний репозиторій `common/`, перед
 пошуком старішого коміту потрібно розширити його історію. Це може потребувати
 мережі:
