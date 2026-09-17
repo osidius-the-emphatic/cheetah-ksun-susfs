@@ -30,7 +30,7 @@ Google, KernelSU-Next і SuSFS отримуються окремо та збер
 
 ## Результати
 
-`build_ksu_next_susfs.sh` створює `Image.lz4-dtb`, `vmlinux` і файл доказів. `package_kernel_image.sh` створює новий каталог `repacked-images/` з `boot.img`, `checksums.txt` та `package-proof.txt`. Жоден скрипт не запускає `fastboot`.
+`build_ksu_next_susfs.sh` створює `Image.lz4-dtb`, `vmlinux` і файл доказів. `package_kernel_image.sh` створює новий каталог `repacked-images/` з `boot.img`, `checksums.txt`, `package-proof.txt` та копією перевіреного `ksu-next-susfs-build-proof.txt`. Жоден скрипт не запускає `fastboot`.
 
 ## Workflow
 

@@ -52,7 +52,8 @@ records the Google checkout commit, both integration source commits, and
 SHA-256 hashes of the kernel artifacts.
 
 The package script creates a new directory below `repacked-images/` containing
-`boot.img`, `checksums.txt`, and `package-proof.txt`. It never runs fastboot.
+`boot.img`, `checksums.txt`, `package-proof.txt`, and a copy of the validated
+`ksu-next-susfs-build-proof.txt`. It never runs fastboot.
 
 ## Workflow
 
