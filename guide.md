@@ -40,38 +40,48 @@ local Google checkout; it is not pushed to any upstream repository.
 
 Download the factory image for the exact build installed on the phone. Keep boot.img, init_boot.img, vendor_boot.img, vendor.img, vbmeta.img, and vbmeta_system.img together as recovery/reference artifacts. Never mix releases and do not modify vendor.img.
 
-## 2. Choose directories and open WSL
+## 2. Choose directories and open WSL (Windows Subsystem for Linux)
 
 The project repository is a separate Git repository inside the Google checkout
-directory. Initialize the Google checkout before cloning this project. Run the
-scripts from the checkout root and they need no arguments or exported variables:
+directory. Initialize the Google checkout before cloning this project as
+`ksun-susfs/` inside its root.
+
+WSL is the Linux environment provided by Windows. Run the shell commands in
+this guide in native Linux or in a WSL Linux distribution, not in PowerShell.
+
+### Default layout: no variables or options
+
+The scripts need no environment variables or command-line options when all of
+the following are true:
+
+- the current directory is the root of the Google checkout;
+- this project was cloned as `ksun-susfs/` inside that root;
+- you created `stock-images/` in that root and placed the matching factory
+  images from one release there: `boot.img`, `init_boot.img`, `vendor_boot.img`,
+  `vendor.img`, `vbmeta.img`, and `vbmeta_system.img`. The package script uses
+  `boot.img`; keep the other images for the test and recovery steps.
+
+Run the separate build and package commands shown later in this guide from the
+checkout root; they call `./ksun-susfs/build_ksu_next_susfs.sh` and
+`./ksun-susfs/package_kernel_image.sh` respectively. No variable assignment is
+needed for that default layout.
+
+### Optional path overrides
+
+The supported options and environment variables are documented with each
+script below. A command-line option affects only that invocation and takes
+precedence over the corresponding exported environment variable.
+
+## 3. Obtain or reuse the Google source tree
+
+At the start of the shell session, set the checkout path. The following
+variables derive the standard locations used by the commands in this guide;
+they are shell shortcuts, not environment overrides for either script.
 
 ```bash
 KERNEL_CHECKOUT="$HOME/dev/cheetah-kernel"
-PROJECT="$KERNEL_CHECKOUT/ksun-susfs"
 STOCK_IMAGES="$KERNEL_CHECKOUT/stock-images"
-DIST="$KERNEL_CHECKOUT/out/android-msm-cheetah-6.1"
-cd "$KERNEL_CHECKOUT"
 ```
-
-`KERNEL_CHECKOUT` is only needed when launching from another directory. If it
-is unset, the current directory is used. CLI options remain available as
-one-run overrides.
-
-| Input | Used by | Default when not set |
-| --- | --- | --- |
-| `KERNEL_CHECKOUT` (`--kernel-checkout` override) | Build and package scripts | Current directory; set it only when launching from elsewhere. |
-| `STOCK_IMAGES` (`--stock-images` override) | Package script | `$KERNEL_CHECKOUT/stock-images` |
-| `DIST` (`--dist` override) | Build and package scripts | `$KERNEL_CHECKOUT/out/android-msm-cheetah-6.1` |
-| `MAGISKBOOT` (`--magiskboot` override) | Package script | `magiskboot` resolved from `PATH` |
-| `GOOGLE_BASE_COMMIT` | Build script, in `config/versions.env` | Required exact commit; determine it from `uname -r` before the build. |
-| `--output` | Package script | A new temporary-named directory under `$KERNEL_CHECKOUT/repacked-images/` |
-| `--keep-workdir` | Package script | Disabled; the temporary unpack directory is removed after success |
-
-`PROJECT` is only a shell convenience for locating this repository; the
-scripts do not read it.
-
-## 3. Obtain or reuse the Google source tree
 
 For a new checkout:
 
@@ -79,121 +89,29 @@ For a new checkout:
 mkdir -p "$KERNEL_CHECKOUT"
 cd "$KERNEL_CHECKOUT"
 repo init -u https://android.googlesource.com/kernel/manifest \
-  -b common-android14-6.1 --depth=1
+  -b common-android14-6.1
 repo sync -c --no-tags -j"$(nproc)"
 ```
 
 After `repo init` and `repo sync` finish, clone this project into the checkout.
-If `$PROJECT` already exists, do not clone it again:
+If `ksun-susfs/` already exists, do not clone it again:
 
 ```bash
-git clone https://github.com/osidius-the-emphatic/cheetah-ksun-susfs.git "$PROJECT"
+git clone https://github.com/osidius-the-emphatic/cheetah-ksun-susfs.git ksun-susfs
 ```
-
-First record the release running on the phone:
-
-```bash
-adb shell uname -r
-```
-
-If the phone cannot boot the matching stock release yet, inspect its factory
-`boot.img` instead. Run the following in an empty temporary directory because
-`magiskboot unpack` writes a local `kernel` file:
-
-```bash
-magiskboot unpack "$STOCK_IMAGES/boot.img"
-strings kernel | grep -m1 "Linux version"
-```
-
-Use the `-g` suffix from either release string to identify the Google source
-commit.
-
-Because `repo init --depth=1` creates a shallow `common/` repository, extend
-its history before looking up an older commit. This step may require network:
-
-```bash
-cd "$KERNEL_CHECKOUT/common"
-if git rev-parse --is-shallow-repository | grep -qx true; then
-  git fetch --unshallow origin
-fi
-```
-
-The matching Pixel 7 Pro `boot.img` kernel payload inspected on 2026-09-15 embeds the
-release `6.1.157-android14-11-gbd23337e42e7-ab14791245`. Its `-g` suffix
-resolves to `bd23337e42e794964a89f47596daf1209a25ee1a`, which is the pinned
-Google base in this repository. “Pin `common/`” means check out that exact
-source commit in the local `common/` Git repository; it does not mean merely
-selecting the `common-android14-6.1` branch. Confirm that the commit exists
-locally, then create or move a local working branch to it:
-
-```bash
-cd "$KERNEL_CHECKOUT/common"
-git log --oneline --all --decorate | grep bd23337e42e7
-git checkout -B cheetah-build bd23337e42e7
-git log -1 --oneline
-git status --short
-```
-
-For another factory image or a later OTA, replace `bd23337e42e7` with the
-device's `-g` suffix and record the resolved full SHA in `config/versions.env`
-as `GOOGLE_BASE_COMMIT=...`. If no matching commit is found, stop: fetch the
-correct Google source history or identify the matching factory/kernel revision
-before integrating anything. Finally confirm that `$KERNEL_CHECKOUT/common`,
-`$KERNEL_CHECKOUT/build`, and `$KERNEL_CHECKOUT/tools/bazel` exist.
-
-### Repeat a build with an existing checkout
-
-The build script refuses tracked changes in common/. Inspect before cleaning:
-
-```bash
-cd "$KERNEL_CHECKOUT/common"
-git status --short
-git log -1 --oneline
-```
-
-For a clean repeat that intentionally discards the previous local integration,
-after confirming the path and recording the kernel release currently running on
-the phone:
-
-```bash
-cd "$KERNEL_CHECKOUT"
-repo forall -c 'git reset --hard && git clean -fdx'
-repo sync -l -d
-rm -rf "$KERNEL_CHECKOUT/out/android-msm-cheetah-6.1"
-rm -rf "$KERNEL_CHECKOUT/susfs4ksu" "$KERNEL_CHECKOUT/KernelSU-Next"
-```
-
-This clean-repeat procedure resets every
-manifest project, including `common/`; `git clean -fdx` also removes ignored
-integration leftovers. `repo sync -l -d` restores local manifest revisions
-without downloading new objects. It does **not** select the kernel revision
-running on the phone, so pin `common/` again before integration. If `common/`
-is still shallow, this requires a network fetch:
-
-```bash
-adb shell uname -r
-cd "$KERNEL_CHECKOUT/common"
-if git rev-parse --is-shallow-repository | grep -qx true; then
-  git fetch --unshallow origin
-fi
-git log --oneline --all --decorate | grep <kernel-commit>
-git checkout -B cheetah-build <kernel-commit>
-git log -1 --oneline
-git status --short
-```
-
-Replace `<kernel-commit>` with the commit abbreviation after `-g` in
-`uname -r`, then record the resolved full SHA in `config/versions.env` as
-`GOOGLE_BASE_COMMIT=...`. If it is not present locally, fetch the matching Google history or
-stop and identify the correct factory/kernel revision. These commands discard
-tracked, untracked, and ignored changes in the checkout, so preserve unrelated
-work first. The two integration clones and the exact cheetah dist directory are
-then removed.
 
 ## 4. Place the stock images
 
+Create `stock-images/`:
+
 ```bash
 mkdir -p "$STOCK_IMAGES"
+```
+
+Copy the images from one matching factory release to that directory, then
+verify it:
+
+```bash
 test -f "$STOCK_IMAGES/boot.img"
 test -f "$STOCK_IMAGES/init_boot.img"
 test -f "$STOCK_IMAGES/vendor_boot.img"
@@ -205,14 +123,116 @@ command -v magiskboot
 
 All tests must return status 0. The package stage requires only boot.img; the other files are retained for recovery and reference.
 
-## 5. Build KernelSU-Next + SuSFS
+## 5. Identify and pin the Google base
 
-This is the long-running step. Before changing the checkout, the script reads
-`$PROJECT/config/versions.env` (resolved relative to the script itself):
+First record the release running on the phone:
 
 ```bash
-VERSIONS_FILE="$SCRIPT/config/versions.env"
-source "$VERSIONS_FILE"
+adb shell uname -r
+```
+
+If the phone cannot boot the matching stock release yet, inspect its factory
+`boot.img` instead. Run the following in a new empty temporary directory;
+`magiskboot unpack` writes a local `kernel` file:
+
+```bash
+WORKDIR="$(mktemp -d)"
+cd "$WORKDIR"
+magiskboot unpack "$STOCK_IMAGES/boot.img"
+strings kernel | grep -m1 "Linux version"
+```
+
+Use the `-g` suffix from either release string to identify the Google source
+commit. The matching Pixel 7 Pro `boot.img` inspected on 2026-09-15 contains
+`6.1.157-android14-11-gbd23337e42e7-ab14791245`; its suffix resolves to
+`bd23337e42e794964a89f47596daf1209a25ee1a`.
+
+“Pin `common/`” means check out that exact source commit in the local
+`common/` Git repository. Resolve the abbreviated suffix to a full SHA, record
+that full value as `GOOGLE_BASE_COMMIT=...` in
+`$KERNEL_CHECKOUT/ksun-susfs/config/versions.env`,
+then create or move the local working branch to it:
+
+```bash
+cd "$KERNEL_CHECKOUT/common"
+git rev-parse --verify "bd23337e42e7^{commit}"
+git checkout -B cheetah-build bd23337e42e7
+git rev-parse HEAD
+git status --short
+```
+
+For another factory image or a later OTA, replace `bd23337e42e7` with that
+image's `-g` suffix. If `git rev-parse --verify` fails, fetch updated Google
+source history before proceeding:
+
+```bash
+cd "$KERNEL_CHECKOUT"
+repo sync -c --no-tags -j"$(nproc)"
+cd "$KERNEL_CHECKOUT/common"
+git rev-parse --verify "<kernel-commit>^{commit}"
+```
+
+Finally confirm that `$KERNEL_CHECKOUT/common`, `$KERNEL_CHECKOUT/build`, and
+`$KERNEL_CHECKOUT/tools/bazel` exist.
+
+### Repeat a build with an existing checkout
+
+If this is a new shell session, set the actual checkout path first:
+
+```bash
+KERNEL_CHECKOUT="$HOME/dev/cheetah-kernel"
+STOCK_IMAGES="$KERNEL_CHECKOUT/stock-images"
+```
+
+The following clean-repeat procedure intentionally discards the previous local
+integration and all other tracked, untracked, and ignored changes in manifest
+projects. Preserve unrelated work first:
+
+```bash
+cd "$KERNEL_CHECKOUT"
+repo forall -c 'git reset --hard && git clean -fdx'
+repo sync -l -d
+rm -rf "$KERNEL_CHECKOUT/out/android-msm-cheetah-6.1"
+rm -rf "$KERNEL_CHECKOUT/susfs4ksu" "$KERNEL_CHECKOUT/KernelSU-Next"
+```
+
+`repo sync -l -d` does not download new objects. Record `adb shell uname -r`,
+then repeat the pinning procedure above. If the new `-g` suffix is not already
+available locally, use the network `repo sync` command above before checking it
+out.
+
+## 6. Build KernelSU-Next + SuSFS
+
+This is the long-running step. The script always reads the adjacent
+`ksun-susfs/config/versions.env` file before changing the checkout.
+
+`GOOGLE_BASE_COMMIT` is an obligatory compatibility pin, not a path setting and
+not a command-line option. It identifies the exact Google `common/` commit
+whose source matches the kernel release in the corresponding stock `boot.img`.
+Before changing source files, the script requires this value, resolves it to a
+commit, and verifies that `common/HEAD` is exactly the same commit. This stops
+the integration from being applied to an arbitrary revision of the moving
+`common-android14-6.1` branch. Determine it from the release string obtained
+with `adb shell uname -r` or from the stock `boot.img`, then record the full SHA
+in `config/versions.env`. It cannot be overridden by an option or environment
+variable.
+
+### `build_ksu_next_susfs.sh`: interface and precedence
+
+For each configurable path, precedence is: command-line option, then exported
+environment variable, then the default below. `config/versions.env` is always
+read from the directory containing the script.
+
+| Purpose | Environment variable | Command-line option | Default |
+| --- | --- | --- | --- |
+| Google checkout | `KERNEL_CHECKOUT` | `--kernel-checkout PATH` | Current directory |
+| Kleaf results | `DIST` | `--dist PATH` | `$KERNEL_CHECKOUT/out/android-msm-cheetah-6.1` |
+| Required base revision | None; set in `config/versions.env` | None | No default; the script stops if `GOOGLE_BASE_COMMIT` is empty or does not match `common/HEAD`. |
+
+Use `--help` to print the syntax:
+
+```bash
+bash ./ksun-susfs/build_ksu_next_susfs.sh --help
 ```
 
 It uses `SUSFS_REPO`, `SUSFS_BRANCH`, `KSUN_REPO`, and `KSUN_BRANCH` from that
@@ -233,7 +253,7 @@ selected `dev-susfs` integration supplies the SuSFS configuration.
 
 ```bash
 cd "$KERNEL_CHECKOUT"
-bash "$PROJECT/build_ksu_next_susfs.sh"
+bash ./ksun-susfs/build_ksu_next_susfs.sh
 ```
 
 The script reads `KERNEL_CHECKOUT` (or uses the current directory), requires
@@ -247,31 +267,43 @@ git -C "$KERNEL_CHECKOUT/common" status --short
 git -C "$KERNEL_CHECKOUT/common" log -1 --oneline
 ```
 
-The underlying target is:
-
-```bash
-tools/bazel run --config=fast --config=stamp --lto=thin //common:kernel_aarch64_dist -- --dist_dir="$DIST"
-```
-
 A successful run must produce Image.lz4-dtb, vmlinux, and ksu-next-susfs-build-proof.txt. Do not package a partial or failed dist.
 
-## 6. Inspect the build result
+## 7. Inspect the build result
 
 ```bash
-sed -n '1,240p' "$DIST/ksu-next-susfs-build-proof.txt"
-test -s "$DIST/Image.lz4-dtb"
-test -s "$DIST/vmlinux"
+sed -n '1,240p' ./out/android-msm-cheetah-6.1/ksu-next-susfs-build-proof.txt
+test -s ./out/android-msm-cheetah-6.1/Image.lz4-dtb
+test -s ./out/android-msm-cheetah-6.1/vmlinux
 ```
 
 The proof records common, SuSFS, and KernelSU-Next commits plus SHA-256 hashes. If an expected commit pin is set and upstream moved, stop and review the new source before changing the pin.
 
-## 7. Package boot
+## 8. Package boot
+
+### `package_kernel_image.sh`: interface and precedence
+
+For each configurable path or executable, precedence is: command-line option,
+then exported environment variable, then the default below. `--output` and
+`--keep-workdir` have no environment-variable form.
+
+| Purpose | Environment variable | Command-line option | Default |
+| --- | --- | --- | --- |
+| Google checkout | `KERNEL_CHECKOUT` | `--kernel-checkout PATH` | Current directory |
+| Stock-image directory | `STOCK_IMAGES` | `--stock-images PATH` | `$KERNEL_CHECKOUT/stock-images` |
+| Kleaf results | `DIST` | `--dist PATH` | `$KERNEL_CHECKOUT/out/android-msm-cheetah-6.1` |
+| `magiskboot` executable | `MAGISKBOOT` | `--magiskboot PATH` | `magiskboot` resolved from `PATH` |
+| Package output directory | None | `--output PATH` | New `cheetah.XXXXXX` directory under `$KERNEL_CHECKOUT/repacked-images/` |
+| Preserve temporary unpack directory | None | `--keep-workdir` | Disabled |
+
+```bash
+bash ./ksun-susfs/package_kernel_image.sh --help
+```
 
 Packaging consumes the successful Image.lz4-dtb and one matching stock boot.img:
 
 ```bash
-cd "$KERNEL_CHECKOUT"
-bash "$PROJECT/package_kernel_image.sh"
+bash ./ksun-susfs/package_kernel_image.sh
 ```
 
 The result is a new directory below `$KERNEL_CHECKOUT/repacked-images/`
@@ -281,7 +313,7 @@ SHA-256 does not match that build proof.
 
 There is intentionally no vendor_boot output in this workflow. Only the kernel carried by boot.img is replaced; init_boot.img, vendor_boot.img, and vendor.img remain untouched.
 
-## 8. Flash the generated image
+## 9. Flash the generated image
 
 Restore stock `init_boot.img` first if an old LKM installation is present.
 Remove the old `susfs4ksu-module` as well, because it belongs to the previous
@@ -314,7 +346,7 @@ fastboot reboot
 
 The scripts never execute these commands. Keep stock images as the recovery path.
 
-## 9. Verify the booted kernel
+## 10. Verify the booted kernel
 
 ```bash
 adb wait-for-device
@@ -335,7 +367,7 @@ Runtime checks complement but do not replace the build proof. The `dev-susfs`
 branch is experimental; a successful temporary boot is not a production
 guarantee.
 
-## 10. Manager and SuSFS userspace module
+## 11. Manager and SuSFS userspace module
 
 Install one official KernelSU-Next Manager APK from the
 [official releases](https://github.com/KernelSU-Next/KernelSU-Next/releases).
@@ -364,7 +396,7 @@ If the problem persists with one Manager, collect a full `adb bugreport` and
 compare the Manager/kernel source commits rather than only the displayed
 version strings.
 
-## 11. Recovery
+## 12. Recovery
 
 If the device fails to boot:
 
@@ -376,7 +408,7 @@ fastboot reboot
 
 If AVB metadata was changed separately, restore matching stock vbmeta images using the official factory-image procedure. Do not improvise with another release.
 
-## 12. Updating KernelSU-Next or SuSFS
+## 13. Updating KernelSU-Next or SuSFS
 
 1. Change one component at a time in config/versions.env.
 2. Clean common/ and remove the old local component clone.
@@ -386,14 +418,14 @@ If AVB metadata was changed separately, restore matching stock vbmeta images usi
 
 Do not replace the source tree with an opaque archive. A changed SuSFS patch must be checked against the exact common revision.
 
-## 13. Why `config/versions.env` exists
+## 14. Why `config/versions.env` exists
 
 `config/versions.env` is the single source of truth for external inputs. The
 build script resolves it relative to `build_ksu_next_susfs.sh`, so it works the
 same way regardless of the current directory. Inspect it with:
 
 ```bash
-sed -n '1,120p' "$PROJECT/config/versions.env"
+sed -n '1,120p' ./ksun-susfs/config/versions.env
 ```
 
 Pinned commit variables make the selected source snapshot reproducible and
@@ -403,7 +435,7 @@ that the current SuSFS/KernelSU-Next pins build, preserve ABI, or boot. Refresh
 the integration pins only after reviewing the candidate source and completing a
 clean build with its proof.
 
-## 14. Troubleshooting
+## 15. Troubleshooting
 
 | Symptom | Likely cause | Safe response |
 | --- | --- | --- |
@@ -415,6 +447,6 @@ clean build with its proof.
 | `magiskboot` cannot process `boot.img` | The wrong image or executable was selected. | Use `boot.img` from the same factory build and pass `--magiskboot PATH` when needed. Never substitute `init_boot.img`. |
 | Manager reports KernelSU is not installed | The generated image was not booted, a second Manager is competing, or ADB root was not granted. | Confirm `uname -r`, keep exactly one Manager installed, reboot, then grant root to ADB/shell. Compare the proof commit rather than only displayed version numbers. |
 
-## 15. Historical notes
+## 16. Historical notes
 
 This is the Pixel 7 Pro/GKI 6.1 workflow. Because the device uses a split boot layout, only boot.img is repacked here, while init_boot.img remains a stock recovery artifact.

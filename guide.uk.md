@@ -37,159 +37,80 @@
 `vendor.img`, `vbmeta.img` та `vbmeta_system.img`. Не змішуйте файли з різних
 заводських збірок і не змінюйте `vendor.img`.
 
-## 2. Каталоги та WSL
+## 2. Каталоги та WSL (Windows Subsystem for Linux)
 
 Репозиторій проєкту є окремим Git-репозиторієм усередині каталогу робочої
 копії Google. Спочатку ініціалізуйте робочу копію Google, а потім клонуйте цей
-проєкт. Скрипти запускають із кореня робочої копії без параметрів і змінних
-середовища:
+проєкт як `ksun-susfs/` у її корені.
+
+WSL (Windows Subsystem for Linux) — це Linux-середовище в Windows. Команди з
+цього посібника виконуйте в нативному Linux або в Linux-дистрибутиві WSL, а не
+в PowerShell.
+
+### Типове розміщення: без змінних і параметрів
+
+Скрипти не потребують змінних середовища або параметрів командного рядка, якщо
+одночасно виконано всі ці умови:
+
+- поточний каталог — корінь робочої копії Google;
+- цей проєкт клоновано як `ksun-susfs/` у цьому корені;
+- ви створили в цьому корені `stock-images/` і помістили туди образи однієї
+  відповідної заводської збірки: `boot.img`, `init_boot.img`, `vendor_boot.img`,
+  `vendor.img`, `vbmeta.img` і `vbmeta_system.img`. Скрипт пакування використовує
+  `boot.img`; інші образи зберігайте для тестування та відновлення.
+
+Окремі команди збирання та пакування, наведені далі в посібнику, запускайте з
+кореня робочої копії; вони викликають відповідно
+`./ksun-susfs/build_ksu_next_susfs.sh` і
+`./ksun-susfs/package_kernel_image.sh`. За типового розміщення жодних змінних
+призначати не потрібно.
+
+### Необов'язкове перевизначення шляхів
+
+Підтримувані параметри й змінні середовища описано нижче разом із кожним
+скриптом. Параметр командного рядка впливає лише на цей запуск і має пріоритет
+над відповідною експортованою змінною середовища.
+
+## 3. Отримання або повторне використання дерева вихідного коду Google
+
+На початку сеансу оболонки задайте шлях до робочої копії. Наступні змінні
+утворюють стандартні шляхи для команд цього посібника; це скорочення оболонки,
+а не перевизначення середовища для жодного зі скриптів.
 
 ```bash
 KERNEL_CHECKOUT="$HOME/dev/cheetah-kernel"
-PROJECT="$KERNEL_CHECKOUT/ksun-susfs"
 STOCK_IMAGES="$KERNEL_CHECKOUT/stock-images"
-DIST="$KERNEL_CHECKOUT/out/android-msm-cheetah-6.1"
-cd "$KERNEL_CHECKOUT"
 ```
 
-Скрипти можна запускати з кореня робочої копії ядра без параметрів і змінних
-середовища. Якщо запускати їх з іншого каталогу, задайте `KERNEL_CHECKOUT`.
-За потреби `STOCK_IMAGES`, `DIST` і `MAGISKBOOT` теж можна перевизначити
-змінними середовища або параметрами командного рядка; параметр має пріоритет.
-
-| Вхідне значення | Використовує | Значення за замовчуванням |
-| --- | --- | --- |
-| `KERNEL_CHECKOUT` (`--kernel-checkout`) | Скрипти збирання й пакування | Поточний каталог; задайте лише для запуску з іншого місця. |
-| `STOCK_IMAGES` (`--stock-images`) | Скрипт пакування | `$KERNEL_CHECKOUT/stock-images` |
-| `DIST` (`--dist`) | Скрипти збирання й пакування | `$KERNEL_CHECKOUT/out/android-msm-cheetah-6.1` |
-| `MAGISKBOOT` (`--magiskboot`) | Скрипт пакування | `magiskboot`, знайдений через `PATH` |
-| `GOOGLE_BASE_COMMIT` | Скрипт збирання, у `config/versions.env` | Обов’язковий точний коміт; визначте його з `uname -r` до збирання. |
-| `--output` | Скрипт пакування | Новий каталог із тимчасовим іменем у `$KERNEL_CHECKOUT/repacked-images/` |
-| `--keep-workdir` | Скрипт пакування | Вимкнено; тимчасовий каталог розпакування видаляється після успіху |
-
-Для запуску з іншого каталогу передайте `--kernel-checkout /шлях/до/ядра`.
-
-## 3. Отримання або повторне використання дерева вихідного коду Google
+Для нової робочої копії:
 
 ```bash
 mkdir -p "$KERNEL_CHECKOUT"
 cd "$KERNEL_CHECKOUT"
 repo init -u https://android.googlesource.com/kernel/manifest \
-  -b common-android14-6.1 --depth=1
+  -b common-android14-6.1
 repo sync -c --no-tags -j"$(nproc)"
 ```
 
 Після завершення `repo init` і `repo sync` клонуйте цей проєкт у робочу копію.
-Якщо `$PROJECT` уже існує, не клонуйте його повторно:
+Якщо `ksun-susfs/` уже існує, не клонуйте його повторно:
 
 ```bash
-git clone https://github.com/osidius-the-emphatic/cheetah-ksun-susfs.git "$PROJECT"
+git clone https://github.com/osidius-the-emphatic/cheetah-ksun-susfs.git ksun-susfs
 ```
-
-Спочатку запишіть версію ядра, що зараз працює на телефоні:
-
-```bash
-adb shell uname -r
-```
-
-Якщо телефон ще не може завантажити відповідне заводське оновлення, натомість
-перевірте його заводський `boot.img`. Виконуйте наступне в порожньому тимчасовому
-каталозі, бо `magiskboot unpack` записує локальний файл `kernel`:
-
-```bash
-magiskboot unpack "$STOCK_IMAGES/boot.img"
-strings kernel | grep -m1 "Linux version"
-```
-
-Використайте суфікс `-g` з будь-якого з цих рядків версії, щоб визначити
-коміт вихідного коду Google.
-
-Оскільки `repo init --depth=1` створює неповний репозиторій `common/`, перед
-пошуком старішого коміту потрібно розширити його історію. Це може потребувати
-мережі:
-
-```bash
-cd "$KERNEL_CHECKOUT/common"
-if git rev-parse --is-shallow-repository | grep -qx true; then
-  git fetch --unshallow origin
-fi
-```
-
-У відповідному `boot.img` Pixel 7 Pro, вміст ядра якого перевірено 2026-09-15,
-записано версію `6.1.157-android14-11-gbd23337e42e7-ab14791245`. Його суфікс
-`-g` розгортається у `bd23337e42e794964a89f47596daf1209a25ee1a` — це
-зафіксована базова ревізія Google для цього репозиторію. «Зафіксувати `common/`» означає
-перейти саме на цей коміт вихідного коду в локальному Git-репозиторії
-`common/`; це не просто вибір гілки `common-android14-6.1`. Спочатку
-переконайтеся, що коміт є в локальній історії, потім створіть або перемістіть
-локальну робочу гілку:
-
-```bash
-cd "$KERNEL_CHECKOUT/common"
-git log --oneline --all --decorate | grep bd23337e42e7
-git checkout -B cheetah-build bd23337e42e7
-git log -1 --oneline
-git status --short
-```
-
-Для іншого заводського образу або після OTA замініть `bd23337e42e7` на суфікс
-`-g` пристрою та запишіть повний SHA у `config/versions.env` як
-`GOOGLE_BASE_COMMIT=...`. Якщо коміт не знайдений, зупиніться: отримайте
-правильну історію вихідного коду Google або визначте відповідну ревізію
-заводського образу та ядра до будь-якої інтеграції. Наприкінці перевірте
-наявність `$KERNEL_CHECKOUT/common`, `$KERNEL_CHECKOUT/build` і
-`$KERNEL_CHECKOUT/tools/bazel`.
-
-### Повторна збірка
-
-```bash
-cd "$KERNEL_CHECKOUT/common"
-git status --short
-git log -1 --oneline
-```
-
-Для чистого повтору, який свідомо відкидає попередню локальну інтеграцію,
-після перевірки шляху й фіксації версії ядра, що зараз працює на телефоні:
-
-```bash
-cd "$KERNEL_CHECKOUT"
-repo forall -c 'git reset --hard && git clean -fdx'
-repo sync -l -d
-rm -rf "$KERNEL_CHECKOUT/out/android-msm-cheetah-6.1"
-rm -rf "$KERNEL_CHECKOUT/susfs4ksu" "$KERNEL_CHECKOUT/KernelSU-Next"
-```
-
-У цьому способі повторного збирання `repo forall` скидає всі проєкти маніфесту,
-включно з `common/`, а `git clean -fdx` також прибирає ігноровані залишки
-інтеграції. `repo sync -l -d` відновлює локальні ревізії маніфесту без
-завантаження нових об’єктів, але **не** вибирає ревізію ядра телефона, тому
-перед інтеграцією знову зафіксуйте `common/`. Якщо `common/` усе ще shallow,
-це потребує отримання даних із мережі:
-
-```bash
-adb shell uname -r
-cd "$KERNEL_CHECKOUT/common"
-if git rev-parse --is-shallow-repository | grep -qx true; then
-  git fetch --unshallow origin
-fi
-git log --oneline --all --decorate | grep <kernel-commit>
-git checkout -B cheetah-build <kernel-commit>
-git log -1 --oneline
-git status --short
-```
-
-Замініть `<kernel-commit>` на скорочений коміт після `-g` у `uname -r`, а повний SHA запишіть у
-`config/versions.env` як `GOOGLE_BASE_COMMIT=...`. Якщо
-його немає локально, отримайте відповідну історію Google або зупиніться й
-визначте правильну ревізію заводського образу та ядра. Команди відкидають
-відстежувані, невідстежувані та ігноровані зміни в робочій копії, тому сторонню
-локальну роботу потрібно зберегти заздалегідь. Два клони інтеграційних
-репозиторіїв і точний каталог результатів Cheetah після цього видаляються.
 
 ## 4. Заводські образи
 
+Створіть `stock-images/`:
+
 ```bash
 mkdir -p "$STOCK_IMAGES"
+```
+
+Скопіюйте до нього образи однієї відповідної заводської збірки, а потім
+перевірте каталог:
+
+```bash
 test -f "$STOCK_IMAGES/boot.img"
 test -f "$STOCK_IMAGES/init_boot.img"
 test -f "$STOCK_IMAGES/vendor_boot.img"
@@ -202,14 +123,116 @@ command -v magiskboot
 Усі перевірки мають завершитися зі статусом 0. Скрипт пакування використовує
 лише `boot.img`; інші образи потрібні для відновлення та як еталон.
 
-## 5. Збірка KernelSU-Next + SuSFS
+## 5. Визначення й фіксація базової ревізії Google
 
-Це довга операція. Перед зміною робочої копії скрипт читає
-`$PROJECT/config/versions.env` відносно власного шляху:
+Спочатку запишіть версію ядра, що зараз працює на телефоні:
 
 ```bash
-VERSIONS_FILE="$SCRIPT/config/versions.env"
-source "$VERSIONS_FILE"
+adb shell uname -r
+```
+
+Якщо телефон ще не може завантажити відповідне заводське оновлення, натомість
+перевірте його заводський `boot.img`. Виконуйте наступне в новому порожньому
+тимчасовому каталозі: `magiskboot unpack` записує локальний файл `kernel`.
+
+```bash
+WORKDIR="$(mktemp -d)"
+cd "$WORKDIR"
+magiskboot unpack "$STOCK_IMAGES/boot.img"
+strings kernel | grep -m1 "Linux version"
+```
+
+Використайте суфікс `-g` з будь-якого з цих рядків версії, щоб визначити
+коміт вихідного коду Google. У відповідному `boot.img`, перевіреному 2026-09-15,
+записано `6.1.157-android14-11-gbd23337e42e7-ab14791245`; його суфікс
+розгортається у `bd23337e42e794964a89f47596daf1209a25ee1a`.
+
+«Зафіксувати `common/`» означає перейти саме на цей коміт у локальному
+Git-репозиторії `common/`. Розгорніть скорочений суфікс до повного SHA, запишіть
+повне значення як `GOOGLE_BASE_COMMIT=...` у
+`$KERNEL_CHECKOUT/ksun-susfs/config/versions.env`,
+потім створіть або перемістіть локальну робочу гілку на цей коміт:
+
+```bash
+cd "$KERNEL_CHECKOUT/common"
+git rev-parse --verify "bd23337e42e7^{commit}"
+git checkout -B cheetah-build bd23337e42e7
+git rev-parse HEAD
+git status --short
+```
+
+Для іншого заводського образу або після OTA замініть `bd23337e42e7` на його
+суфікс `-g`. Якщо `git rev-parse --verify` завершується помилкою, перед
+продовженням отримайте оновлену історію Google:
+
+```bash
+cd "$KERNEL_CHECKOUT"
+repo sync -c --no-tags -j"$(nproc)"
+cd "$KERNEL_CHECKOUT/common"
+git rev-parse --verify "<kernel-commit>^{commit}"
+```
+
+Наприкінці перевірте наявність `$KERNEL_CHECKOUT/common`,
+`$KERNEL_CHECKOUT/build` і `$KERNEL_CHECKOUT/tools/bazel`.
+
+### Повторна збірка
+
+Якщо це новий сеанс оболонки, спочатку задайте фактичний шлях до робочої копії:
+
+```bash
+KERNEL_CHECKOUT="$HOME/dev/cheetah-kernel"
+STOCK_IMAGES="$KERNEL_CHECKOUT/stock-images"
+```
+
+Наступний спосіб чистої повторної збірки навмисно відкидає попередню локальну
+інтеграцію та всі інші відстежувані, невідстежувані й ігноровані зміни у
+проєктах маніфесту. Спочатку збережіть сторонню роботу:
+
+```bash
+cd "$KERNEL_CHECKOUT"
+repo forall -c 'git reset --hard && git clean -fdx'
+repo sync -l -d
+rm -rf "$KERNEL_CHECKOUT/out/android-msm-cheetah-6.1"
+rm -rf "$KERNEL_CHECKOUT/susfs4ksu" "$KERNEL_CHECKOUT/KernelSU-Next"
+```
+
+`repo sync -l -d` не завантажує нові об’єкти. Запишіть результат `adb shell
+uname -r`, потім повторіть наведений вище порядок фіксації. Якщо нового
+суфікса `-g` ще немає локально, перед переходом на нього виконайте наведену
+вище мережеву команду `repo sync`.
+
+## 6. Збірка KernelSU-Next + SuSFS
+
+Це довга операція. Перед зміною робочої копії скрипт завжди читає сусідній
+файл `ksun-susfs/config/versions.env`.
+
+`GOOGLE_BASE_COMMIT` — обов'язкове закріплення сумісності, а не налаштування
+шляху й не параметр командного рядка. Воно визначає точний коміт Google
+`common/`, вихідний код якого відповідає версії ядра у відповідному заводському
+`boot.img`. До зміни вихідного коду скрипт вимагає це значення, розгортає його
+до коміту й перевіряє, що `common/HEAD` дорівнює саме цьому коміту. Це не дає
+накласти інтеграцію на довільну ревізію рухомої гілки
+`common-android14-6.1`. Визначте коміт за рядком версії з `adb shell uname -r`
+або зі заводського `boot.img`, а повний SHA запишіть у
+`config/versions.env`. Його не можна перевизначити параметром або змінною
+середовища.
+
+### `build_ksu_next_susfs.sh`: інтерфейс і пріоритети
+
+Для кожного налаштовуваного шляху пріоритет такий: параметр командного рядка,
+потім експортована змінна середовища, потім типове значення з таблиці.
+`config/versions.env` завжди читається з каталогу, де лежить скрипт.
+
+| Призначення | Змінна середовища | Параметр командного рядка | Типове значення |
+| --- | --- | --- | --- |
+| Робоча копія Google | `KERNEL_CHECKOUT` | `--kernel-checkout PATH` | Поточний каталог |
+| Результати Kleaf | `DIST` | `--dist PATH` | `$KERNEL_CHECKOUT/out/android-msm-cheetah-6.1` |
+| Обов'язкова базова ревізія | Немає; задається в `config/versions.env` | Немає | Немає; скрипт зупиняється, якщо `GOOGLE_BASE_COMMIT` порожня або не збігається з `common/HEAD`. |
+
+Щоб вивести синтаксис, використайте `--help`:
+
+```bash
+bash ./ksun-susfs/build_ksu_next_susfs.sh --help
 ```
 
 Він використовує `SUSFS_REPO`, `SUSFS_BRANCH`, `KSUN_REPO` і
@@ -230,7 +253,7 @@ KSU, прибирає блокування protected-export і запускає 
 
 ```bash
 cd "$KERNEL_CHECKOUT"
-bash "$PROJECT/build_ksu_next_susfs.sh"
+bash ./ksun-susfs/build_ksu_next_susfs.sh
 ```
 
 Скрипт читає `KERNEL_CHECKOUT` (або використовує поточний каталог), вимагає
@@ -245,29 +268,41 @@ git -C "$KERNEL_CHECKOUT/common" status --short
 git -C "$KERNEL_CHECKOUT/common" log -1 --oneline
 ```
 
-Команда збирання:
-
-```bash
-tools/bazel run --config=fast --config=stamp --lto=thin //common:kernel_aarch64_dist -- --dist_dir="$DIST"
-```
-
 Успішне завершення створює `Image.lz4-dtb`, `vmlinux` і `ksu-next-susfs-build-proof.txt`.
 
-## 6. Перевірка результату
+## 7. Перевірка результату
 
 ```bash
-sed -n '1,240p' "$DIST/ksu-next-susfs-build-proof.txt"
-test -s "$DIST/Image.lz4-dtb"
-test -s "$DIST/vmlinux"
+sed -n '1,240p' ./out/android-msm-cheetah-6.1/ksu-next-susfs-build-proof.txt
+test -s ./out/android-msm-cheetah-6.1/Image.lz4-dtb
+test -s ./out/android-msm-cheetah-6.1/vmlinux
 ```
 
 Файл доказів містить коміти `common/`, SuSFS і KernelSU-Next, а також SHA-256-хеші. Якщо задано очікуваний закріплений коміт, а гілка вихідного проєкту змінилася, зупиніться та перевірте новий вихідний код, перш ніж змінювати це закріплення. Не пакуйте неповний каталог результатів.
 
-## 7. Пакування boot
+## 8. Пакування boot
+
+### `package_kernel_image.sh`: інтерфейс і пріоритети
+
+Для кожного налаштовуваного шляху або виконуваного файла пріоритет такий:
+параметр командного рядка, потім експортована змінна середовища, потім типове
+значення з таблиці. Для `--output` і `--keep-workdir` змінних середовища немає.
+
+| Призначення | Змінна середовища | Параметр командного рядка | Типове значення |
+| --- | --- | --- | --- |
+| Робоча копія Google | `KERNEL_CHECKOUT` | `--kernel-checkout PATH` | Поточний каталог |
+| Каталог заводських образів | `STOCK_IMAGES` | `--stock-images PATH` | `$KERNEL_CHECKOUT/stock-images` |
+| Результати Kleaf | `DIST` | `--dist PATH` | `$KERNEL_CHECKOUT/out/android-msm-cheetah-6.1` |
+| Виконуваний файл `magiskboot` | `MAGISKBOOT` | `--magiskboot PATH` | `magiskboot`, знайдений через `PATH` |
+| Каталог результату пакування | Немає | `--output PATH` | Новий каталог `cheetah.XXXXXX` у `$KERNEL_CHECKOUT/repacked-images/` |
+| Зберегти тимчасовий каталог розпакування | Немає | `--keep-workdir` | Вимкнено |
 
 ```bash
-cd "$KERNEL_CHECKOUT"
-bash "$PROJECT/package_kernel_image.sh"
+bash ./ksun-susfs/package_kernel_image.sh --help
+```
+
+```bash
+bash ./ksun-susfs/package_kernel_image.sh
 ```
 
 Новий каталог у `$KERNEL_CHECKOUT/repacked-images/` містить `boot.img`,
@@ -278,7 +313,7 @@ bash "$PROJECT/package_kernel_image.sh"
 Цей порядок дій навмисно не створює `vendor_boot`: змінюється тільки ядро в `boot.img`.
 `init_boot.img`, `vendor_boot.img` та `vendor.img` залишаються незмінними.
 
-## 8. Тестування та прошивання
+## 9. Тестування та прошивання
 
 Якщо раніше використовувався root-доступ на основі LKM, спочатку поверніть заводський `init_boot.img`.
 Також видаліть старий `susfs4ksu-module`, бо він належить до попереднього
@@ -310,7 +345,7 @@ fastboot reboot
 
 Скрипти ці команди не виконують. Тримайте заводські образи як шлях відновлення.
 
-## 9. Перевірка завантаженого ядра
+## 10. Перевірка завантаженого ядра
 
 ```bash
 adb wait-for-device
@@ -331,7 +366,7 @@ adb shell su -c 'dmesg | grep -Ei "disagrees about version|invalid module format
 Перевірки під час роботи доповнюють, але не замінюють файл доказів збирання. Гілка `dev-susfs`
 експериментальна; успішне тимчасове завантаження не є гарантією придатності до повсякденного використання.
 
-## 10. Програма KernelSU-Next і модуль SuSFS у просторі користувача
+## 11. Програма KernelSU-Next і модуль SuSFS у просторі користувача
 
 Встановіть одну офіційну програму KernelSU-Next із
 [офіційних релізів](https://github.com/KernelSU-Next/KernelSU-Next/releases).
@@ -359,7 +394,7 @@ adb shell su -c "dmesg | grep -i 'crowning manager'"
 Якщо проблема лишається з однією програмою, зберіть повний `adb bugreport` і
 порівняйте коміти вихідного коду програми та ядра, а не лише відображені рядки версій.
 
-## 11. Відновлення
+## 12. Відновлення
 
 ```bash
 fastboot flash boot "$STOCK_IMAGES/boot.img"
@@ -369,7 +404,7 @@ fastboot reboot
 
 За потреби відновіть відповідні образи vbmeta офіційною процедурою роботи із заводським образом.
 
-## 12. Оновлення KernelSU-Next або SuSFS
+## 13. Оновлення KernelSU-Next або SuSFS
 
 1. Змінюйте один зовнішній компонент за раз у `config/versions.env`.
 2. Очистіть `common/` і видаліть старі локальні клони.
@@ -377,14 +412,14 @@ fastboot reboot
 4. Виконайте чисте збирання і перевірте файл доказів.
 5. Пакуйте лише після успішної збірки.
 
-## 13. Навіщо `config/versions.env`
+## 14. Навіщо `config/versions.env`
 
 Це єдине джерело зовнішніх URL, гілок і закріплених комітів. Скрипт збирання знаходить
 його відносно `build_ksu_next_susfs.sh`, тому поточний каталог не впливає на
 його читання:
 
 ```bash
-sed -n '1,120p' "$PROJECT/config/versions.env"
+sed -n '1,120p' ./ksun-susfs/config/versions.env
 ```
 
 Закріплені коміти роблять вибраний зріз вихідного коду відтворюваним і не
@@ -394,7 +429,7 @@ sed -n '1,120p' "$PROJECT/config/versions.env"
 Оновлюйте закріплення інтеграції лише після рецензії вихідного коду та чистої збірки з
 її файлом доказів.
 
-## 14. Діагностика
+## 15. Діагностика
 
 | Симптом | Імовірна причина | Безпечна дія |
 | --- | --- | --- |
@@ -406,7 +441,7 @@ sed -n '1,120p' "$PROJECT/config/versions.env"
 | `magiskboot` не обробляє `boot.img` | Обрано неправильний образ або виконуваний файл. | Використовуйте `boot.img` тієї самої заводської збірки; за потреби передайте шлях через `--magiskboot`. Ніколи не підставляйте `init_boot.img`. |
 | Програма KernelSU не бачить ядро | Згенерований образ не завантажувався, друга програма конкурує або ADB/оболонці не надано root-доступ. | Перевірте `uname -r`, залиште рівно одну програму, перезавантажте телефон і надайте root-доступ ADB/оболонці. Звіряйте коміт у файлі доказів, а не лише номер версії. |
 
-## 15. Історичні примітки
+## 16. Історичні примітки
 
 Це порядок дій для Pixel 7 Pro/GKI 6.1. Оскільки пристрій має розділену
 структуру образів завантаження, тут перепаковується лише `boot.img`, а
