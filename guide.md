@@ -26,6 +26,7 @@ This workflow uses built-in KernelSU-Next. init_boot.img is not patched by the p
 | package_kernel_image.sh | Replaces the kernel in stock boot.img and writes a new package directory. |
 | config/versions.env | Upstream URLs, branches, and pinned commits. |
 | README.md / guide.md | Canonical project documentation. |
+| AGENTS.md / PROJECT-STATE.md / HANDOFF-context.md | Private recovery context; omit these from a future public copy. |
 | `$KERNEL_CHECKOUT/common/` | Google kernel source modified by the build script. |
 | `$KERNEL_CHECKOUT/out/android-msm-cheetah-6.1/` | Default Kleaf dist directory; not tracked. |
 | `$KERNEL_CHECKOUT/repacked-images/` | Generated boot packages; not tracked. |
@@ -83,7 +84,7 @@ KERNEL_CHECKOUT="$HOME/dev/cheetah-kernel"
 STOCK_IMAGES="$KERNEL_CHECKOUT/stock-images"
 ```
 
-For a new checkout:
+### New checkout
 
 ```bash
 mkdir -p "$KERNEL_CHECKOUT"
@@ -99,6 +100,26 @@ If `ksun-susfs/` already exists, do not clone it again:
 ```bash
 git clone https://github.com/osidius-the-emphatic/cheetah-ksun-susfs.git ksun-susfs
 ```
+
+### Existing checkout: repeat a build
+
+The path assignments at the start of this section are required in a new shell.
+The following clean-repeat procedure intentionally discards the previous local
+integration and all other tracked, untracked, and ignored changes in manifest
+projects. Preserve unrelated work first:
+
+```bash
+cd "$KERNEL_CHECKOUT"
+repo forall -c 'git reset --hard && git clean -fdx'
+repo sync -l -d
+rm -rf "$KERNEL_CHECKOUT/out/android-msm-cheetah-6.1"
+rm -rf "$KERNEL_CHECKOUT/susfs4ksu" "$KERNEL_CHECKOUT/KernelSU-Next"
+```
+
+`repo sync -l -d` does not download new objects and deliberately returns
+`common/` to the manifest revision. Continue with sections 4 and 5 below.
+Section 5 is the single complete procedure that identifies the device release,
+records `GOOGLE_BASE_COMMIT`, and checks out that exact commit in `common/`.
 
 ## 4. Place the stock images
 
@@ -125,6 +146,9 @@ All tests must return status 0. The package stage requires only boot.img; the ot
 
 ## 5. Identify and pin the Google base
 
+Run this section after either a new checkout or the repeat-build cleanup above.
+It is the only step that selects the `common/` commit used by the build.
+
 First record the release running on the phone:
 
 ```bash
@@ -142,64 +166,42 @@ magiskboot unpack "$STOCK_IMAGES/boot.img"
 strings kernel | grep -m1 "Linux version"
 ```
 
-Use the `-g` suffix from either release string to identify the Google source
-commit. The matching Pixel 7 Pro `boot.img` inspected on 2026-09-15 contains
-`6.1.157-android14-11-gbd23337e42e7-ab14791245`; its suffix resolves to
-`bd23337e42e794964a89f47596daf1209a25ee1a`.
-
-“Pin `common/`” means check out that exact source commit in the local
-`common/` Git repository. Resolve the abbreviated suffix to a full SHA, record
-that full value as `GOOGLE_BASE_COMMIT=...` in
-`$KERNEL_CHECKOUT/ksun-susfs/config/versions.env`,
-then create or move the local working branch to it:
+Use the `-g` suffix from the release string to identify the Google source
+commit. This guide is pinned to the Pixel 7 Pro base
+`2ec90535fa348d27c0a545b05c3badc7fa8ecf68`. The command below writes that
+exact value to the project's configuration and then verifies that the object
+is available locally:
 
 ```bash
+GOOGLE_BASE_COMMIT=2ec90535fa348d27c0a545b05c3badc7fa8ecf68
+sed -i "s/^GOOGLE_BASE_COMMIT=.*/GOOGLE_BASE_COMMIT=$GOOGLE_BASE_COMMIT/" \
+  "$KERNEL_CHECKOUT/ksun-susfs/config/versions.env"
 cd "$KERNEL_CHECKOUT/common"
-git rev-parse --verify "bd23337e42e7^{commit}"
-git checkout -B cheetah-build bd23337e42e7
-git rev-parse HEAD
-git status --short
+git rev-parse --verify "${GOOGLE_BASE_COMMIT}^{commit}"
 ```
 
-For another factory image or a later OTA, replace `bd23337e42e7` with that
-image's `-g` suffix. If `git rev-parse --verify` fails, fetch updated Google
-source history before proceeding:
+If the exact object is not available locally, fetch the manifest projects and
+run the same verification again:
 
 ```bash
 cd "$KERNEL_CHECKOUT"
 repo sync -c --no-tags -j"$(nproc)"
 cd "$KERNEL_CHECKOUT/common"
-git rev-parse --verify "<kernel-commit>^{commit}"
+git rev-parse --verify "${GOOGLE_BASE_COMMIT}^{commit}"
+```
+
+After the object is available, create or move the local working branch to the
+configured full SHA:
+
+```bash
+cd "$KERNEL_CHECKOUT/common"
+git checkout -B cheetah-build "$GOOGLE_BASE_COMMIT"
+git rev-parse HEAD
+git status --short
 ```
 
 Finally confirm that `$KERNEL_CHECKOUT/common`, `$KERNEL_CHECKOUT/build`, and
 `$KERNEL_CHECKOUT/tools/bazel` exist.
-
-### Repeat a build with an existing checkout
-
-If this is a new shell session, set the actual checkout path first:
-
-```bash
-KERNEL_CHECKOUT="$HOME/dev/cheetah-kernel"
-STOCK_IMAGES="$KERNEL_CHECKOUT/stock-images"
-```
-
-The following clean-repeat procedure intentionally discards the previous local
-integration and all other tracked, untracked, and ignored changes in manifest
-projects. Preserve unrelated work first:
-
-```bash
-cd "$KERNEL_CHECKOUT"
-repo forall -c 'git reset --hard && git clean -fdx'
-repo sync -l -d
-rm -rf "$KERNEL_CHECKOUT/out/android-msm-cheetah-6.1"
-rm -rf "$KERNEL_CHECKOUT/susfs4ksu" "$KERNEL_CHECKOUT/KernelSU-Next"
-```
-
-`repo sync -l -d` does not download new objects. Record `adb shell uname -r`,
-then repeat the pinning procedure above. If the new `-g` suffix is not already
-available locally, use the network `repo sync` command above before checking it
-out.
 
 ## 6. Build KernelSU-Next + SuSFS
 
@@ -236,9 +238,10 @@ bash ./ksun-susfs/build_ksu_next_susfs.sh --help
 ```
 
 It uses `SUSFS_REPO`, `SUSFS_BRANCH`, `KSUN_REPO`, and `KSUN_BRANCH` from that
-file to fetch the configured branches. The pinned `SUSFS_EXPECTED_COMMIT` and
-`KSUN_EXPECTED_COMMIT` values stop when a branch tip no longer matches the
-reviewed snapshot. `GOOGLE_BASE_COMMIT` is already matched to the boot image's
+file to fetch the configured branches. When `SUSFS_EXPECTED_COMMIT` or
+`KSUN_EXPECTED_COMMIT` is set, the script verifies that the commit belongs to
+the configured branch and checks out that exact commit in detached HEAD. When
+the value is empty, it uses the current branch tip. `GOOGLE_BASE_COMMIT` is already matched to the boot image's
 kernel payload named above. For another device image, verify its `adb shell uname -r` suffix
 before the build. If it differs, stop; do not substitute a different Google
 commit while retaining the current integration pins. There is no separate
@@ -267,17 +270,17 @@ git -C "$KERNEL_CHECKOUT/common" status --short
 git -C "$KERNEL_CHECKOUT/common" log -1 --oneline
 ```
 
-A successful run must produce Image.lz4-dtb, vmlinux, and ksu-next-susfs-build-proof.txt. Do not package a partial or failed dist.
+A successful run must produce Image.lz4, vmlinux, and ksu-next-susfs-build-proof.txt. Do not package a partial or failed dist.
 
 ## 7. Inspect the build result
 
 ```bash
 sed -n '1,240p' ./out/android-msm-cheetah-6.1/ksu-next-susfs-build-proof.txt
-test -s ./out/android-msm-cheetah-6.1/Image.lz4-dtb
+test -s ./out/android-msm-cheetah-6.1/Image.lz4
 test -s ./out/android-msm-cheetah-6.1/vmlinux
 ```
 
-The proof records common, SuSFS, and KernelSU-Next commits plus SHA-256 hashes. If an expected commit pin is set and upstream moved, stop and review the new source before changing the pin.
+The proof records common, SuSFS, and KernelSU-Next commits plus SHA-256 hashes. A pinned expected commit remains selected when the branch advances; change a pin only after reviewing and validating the new source.
 
 ## 8. Package boot
 
@@ -300,7 +303,7 @@ then exported environment variable, then the default below. `--output` and
 bash ./ksun-susfs/package_kernel_image.sh --help
 ```
 
-Packaging consumes the successful Image.lz4-dtb and one matching stock boot.img:
+Packaging consumes the successful Image.lz4 and one matching stock boot.img:
 
 ```bash
 bash ./ksun-susfs/package_kernel_image.sh
@@ -442,11 +445,11 @@ clean build with its proof.
 | The script refuses the checkout | `--kernel-checkout` is wrong, required checkout files are absent, `GOOGLE_BASE_COMMIT` does not match HEAD, or `common/` is not completely clean. | Use an absolute path; confirm `common/.git`, `common/BUILD.bazel`, `tools/bazel`, and the commit in `config/versions.env`. Preserve unrelated work, then reset `common/` and run `git clean -fdx` before retrying. |
 | The SuSFS patch does not apply | The `common/` revision and `SUSFS_BRANCH` do not match the version-specific patch. | Stop. Verify the pinned source revision and upstream branch; inspect the patch and source diff. Do not use fuzz or force a partial patch. |
 | `CONFIG_KSU_SUSFS` is not found | The clone is not pershoot/KernelSU-Next `dev-susfs`, or that branch changed its layout. | Check the remote URL, checked-out revision, and `kernel/Kconfig` before changing integration logic. |
-| Kleaf does not produce `Image.lz4-dtb` | Bazel failed, resources are insufficient, or the manifest/source revision is inconsistent. | Inspect Bazel output, free disk space, WSL memory, and the selected source revision. Do not package without both artifacts and proof. |
-| Packaging refuses the dist | The build proof is missing or `Image.lz4-dtb` no longer matches it. | Rebuild or restore the matching dist directory. Do not package an artifact whose hash differs from its build proof. |
+| Kleaf does not produce `Image.lz4` | Bazel failed, resources are insufficient, or the manifest/source revision is inconsistent. | Inspect Bazel output, free disk space, WSL memory, and the selected source revision. Do not package without both artifacts and proof. |
+| Packaging refuses the dist | The build proof is missing or `Image.lz4` no longer matches it. | Rebuild or restore the matching dist directory. Do not package an artifact whose hash differs from its build proof. |
 | `magiskboot` cannot process `boot.img` | The wrong image or executable was selected. | Use `boot.img` from the same factory build and pass `--magiskboot PATH` when needed. Never substitute `init_boot.img`. |
 | Manager reports KernelSU is not installed | The generated image was not booted, a second Manager is competing, or ADB root was not granted. | Confirm `uname -r`, keep exactly one Manager installed, reboot, then grant root to ADB/shell. Compare the proof commit rather than only displayed version numbers. |
 
 ## 16. Historical notes
 
-This is the Pixel 7 Pro/GKI 6.1 workflow. Because the device uses a split boot layout, only boot.img is repacked here, while init_boot.img remains a stock recovery artifact.
+This is the Pixel 7 Pro/GKI 6.1 workflow. Because the device uses a split boot layout, only boot.img is repacked here, while init_boot.img remains a stock recovery artifact. Private state belongs in HANDOFF-context.md and is intentionally excluded from the future public copy.

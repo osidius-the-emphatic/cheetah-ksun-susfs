@@ -47,15 +47,15 @@ STOCK_IMAGES="$(cd "$STOCK_IMAGES" && pwd -P)" || die "stock-images directory no
 STOCK_BOOT="$STOCK_IMAGES/boot.img"
 BUILD_PROOF="$DIST/ksu-next-susfs-build-proof.txt"
 [[ -f "$STOCK_BOOT" ]] || die "missing $STOCK_BOOT"
-[[ -f "$DIST/Image.lz4-dtb" ]] || die "missing $DIST/Image.lz4-dtb; run the build first"
+[[ -f "$DIST/Image.lz4" ]] || die "missing $DIST/Image.lz4; run the build first"
 [[ -s "$BUILD_PROOF" ]] || die "missing or empty $BUILD_PROOF; do not package without a successful build proof"
 command -v "$MAGISKBOOT" >/dev/null 2>&1 || die "magiskboot not found: $MAGISKBOOT"
 command -v sha256sum >/dev/null 2>&1 || die 'required command not found: sha256sum'
 command -v awk >/dev/null 2>&1 || die 'required command not found: awk'
-IMAGE_SHA256="$(sha256sum "$DIST/Image.lz4-dtb" | awk '{print $1}')"
-PROOF_IMAGE_SHA256="$(awk -F= '$1 == "image_lz4_dtb_sha256" { print $2; exit }' "$BUILD_PROOF")"
-[[ -n "$PROOF_IMAGE_SHA256" ]] || die "build proof does not contain image_lz4_dtb_sha256: $BUILD_PROOF"
-[[ "$IMAGE_SHA256" == "$PROOF_IMAGE_SHA256" ]] || die 'Image.lz4-dtb hash does not match the build proof'
+IMAGE_SHA256="$(sha256sum "$DIST/Image.lz4" | awk '{print $1}')"
+PROOF_IMAGE_SHA256="$(awk -F= '$1 == "image_lz4_sha256" { print $2; exit }' "$BUILD_PROOF")"
+[[ -n "$PROOF_IMAGE_SHA256" ]] || die "build proof does not contain image_lz4_sha256: $BUILD_PROOF"
+[[ "$IMAGE_SHA256" == "$PROOF_IMAGE_SHA256" ]] || die 'Image.lz4 hash does not match the build proof'
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/cheetah-boot.XXXXXX")"
 cleanup() { local status=$?; if ((KEEP)) || ((status != 0)); then echo "Temporary directory: $WORKDIR" >&2; else rm -rf -- "$WORKDIR"; fi; exit "$status"; }
 trap cleanup EXIT
@@ -66,7 +66,7 @@ cp -p "$STOCK_BOOT" "$WORKDIR/boot.img"
   "$MAGISKBOOT" unpack ../boot.img
 )
 [[ -f "$WORKDIR/unpacked/kernel" ]] || die 'magiskboot did not extract a kernel'
-cp -p "$DIST/Image.lz4-dtb" "$WORKDIR/unpacked/kernel"
+cp -p "$DIST/Image.lz4" "$WORKDIR/unpacked/kernel"
 (
   cd "$WORKDIR/unpacked"
   "$MAGISKBOOT" repack ../boot.img
@@ -82,7 +82,7 @@ fi
 OUTPUT="$(cd "$OUTPUT" && pwd -P)"
 cp -p "$WORKDIR/unpacked/new-boot.img" "$OUTPUT/boot.img"
 cp -p "$BUILD_PROOF" "$OUTPUT/ksu-next-susfs-build-proof.txt"
-sha256sum "$STOCK_BOOT" "$OUTPUT/boot.img" "$DIST/Image.lz4-dtb" > "$OUTPUT/checksums.txt"
+sha256sum "$STOCK_BOOT" "$OUTPUT/boot.img" "$DIST/Image.lz4" > "$OUTPUT/checksums.txt"
 {
   echo "device=cheetah"
   echo "stock_boot=$STOCK_BOOT"
@@ -90,7 +90,7 @@ sha256sum "$STOCK_BOOT" "$OUTPUT/boot.img" "$DIST/Image.lz4-dtb" > "$OUTPUT/chec
   echo "init_boot=not modified"
   echo "build_proof=ksu-next-susfs-build-proof.txt"
   echo "build_proof_sha256=$(sha256sum "$BUILD_PROOF" | awk '{print $1}')"
-  echo "image_lz4_dtb_sha256=$IMAGE_SHA256"
+  echo "image_lz4_sha256=$IMAGE_SHA256"
   echo "boot_sha256=$(sha256sum "$OUTPUT/boot.img" | awk '{print $1}')"
 } > "$OUTPUT/package-proof.txt"
 echo "Package completed: $OUTPUT/boot.img"

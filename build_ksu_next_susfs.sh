@@ -51,21 +51,33 @@ if [[ -n "$(git -C "$COMMON" status --porcelain --untracked-files=all)" ]] || [[
   die 'common is not completely clean; reset it and run git clean -fdx before building'
 fi
 clone_or_update() {
-  local dir="$1" url="$2" branch="$3"
+  local dir="$1" url="$2" branch="$3" expected="${4:-}" base_branch="${5:-}"
+  local -a fetch_refs=("refs/heads/$branch:refs/remotes/origin/$branch")
+  [[ -n "$base_branch" ]] && fetch_refs+=("refs/heads/$base_branch:refs/remotes/origin/$base_branch")
   if [[ -e "$dir" && ! -d "$dir/.git" ]]; then die "$dir exists but is not a git clone"; fi
   if [[ -d "$dir/.git" ]]; then
-    [[ "$(git -C "$dir" remote get-url origin)" == "$url" ]] || die "$dir origin does not match configured repository"
+    [[ "$(git -C "$dir" config --get remote.origin.url)" == "$url" ]] || die "$dir origin does not match configured repository"
   else
     git clone --depth=1 --branch "$branch" "$url" "$dir"
   fi
-  git -C "$dir" fetch --depth=1 origin "$branch"
-  git -C "$dir" reset --hard "origin/$branch"
+  if [[ -n "$expected" ]]; then
+    if [[ "$(git -C "$dir" rev-parse --is-shallow-repository)" == true ]]; then
+      git -C "$dir" fetch --tags --unshallow origin "${fetch_refs[@]}"
+    else
+      git -C "$dir" fetch --tags origin "${fetch_refs[@]}"
+    fi
+    EXPECTED_COMMIT="$(git -C "$dir" rev-parse --verify "$expected^{commit}")" || die "$dir does not contain expected commit: $expected"
+    git -C "$dir" merge-base --is-ancestor "$EXPECTED_COMMIT" "origin/$branch" || die "$dir expected commit is not in origin/$branch: $EXPECTED_COMMIT"
+    git -C "$dir" checkout -B "$branch" "$EXPECTED_COMMIT"
+  else
+    git -C "$dir" fetch --tags --depth=1 origin "${fetch_refs[@]}"
+    git -C "$dir" checkout -B "$branch" "origin/$branch"
+  fi
   git -C "$dir" clean -fdx
-  git -C "$dir" checkout --detach "origin/$branch"
 }
 echo '== 1/6: Fetching integration sources =='
-clone_or_update "$SUSFS" "$SUSFS_REPO" "$SUSFS_BRANCH"
-clone_or_update "$KSUN" "$KSUN_REPO" "$KSUN_BRANCH"
+clone_or_update "$SUSFS" "$SUSFS_REPO" "$SUSFS_BRANCH" "${SUSFS_EXPECTED_COMMIT:-}"
+clone_or_update "$KSUN" "$KSUN_REPO" "$KSUN_BRANCH" "${KSUN_EXPECTED_COMMIT:-}" dev
 SUSFS_HEAD="$(git -C "$SUSFS" rev-parse HEAD)"
 KSUN_HEAD="$(git -C "$KSUN" rev-parse HEAD)"
 [[ -z "${SUSFS_EXPECTED_COMMIT:-}" || "$SUSFS_HEAD" == "$SUSFS_EXPECTED_COMMIT" ]] || die "unexpected susfs4ksu commit: $SUSFS_HEAD"
@@ -75,8 +87,17 @@ cp -p "$SUSFS"/kernel_patches/fs/* "$COMMON/fs/"
 cp -p "$SUSFS"/kernel_patches/include/linux/* "$COMMON/include/linux/"
 SUSFS_PATCH="$SUSFS/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch"
 [[ -f "$SUSFS_PATCH" ]] || die "missing $SUSFS_PATCH"
+PATCH_TMP="$(mktemp)"
+trap 'rm -f "$PATCH_TMP"' EXIT
+cp -p "$SUSFS_PATCH" "$PATCH_TMP"
+SUSFS_PATCH="$PATCH_TMP"
+case "$COMMON_EXPECTED:$SUSFS_HEAD" in
+  2ec90535fa348d27c0a545b05c3badc7fa8ecf68:3e24564bf76999359b832633beda6f1e69f8c11c)
+    sed -i "562s/@@ -32,10 +32,20 @@/@@ -32,11 +32,21 @@/;572i\\ #include <trace/hooks/blk.h>" "$SUSFS_PATCH"
+    ;;
+esac
 if patch --batch --fuzz=0 --forward --dry-run -d "$COMMON" -p1 < "$SUSFS_PATCH" >/dev/null 2>&1; then
-  patch --batch --fuzz=0 --forward -d "$COMMON" -p1 < "$SUSFS_PATCH" >/dev/null || die 'SuSFS patch failed'
+  patch --batch --fuzz=0 --no-backup-if-mismatch --forward -d "$COMMON" -p1 < "$SUSFS_PATCH" >/dev/null || die 'SuSFS patch failed'
 elif patch --batch --fuzz=0 --reverse --dry-run -d "$COMMON" -p1 < "$SUSFS_PATCH" >/dev/null 2>&1; then
   echo 'SuSFS patch is already applied; continuing'
 else
@@ -126,7 +147,7 @@ git -C "$COMMON" commit -m 'Integrate KernelSU-Next and SuSFS for Pixel 7 Pro'
 echo '== 6/6: Building with Kleaf =='
 mkdir -p "$DIST"
 ( cd "$KERNEL_CHECKOUT"; tools/bazel run --config=fast --config=stamp --lto=thin //common:kernel_aarch64_dist -- --dist_dir="$DIST" )
-[[ -f "$DIST/Image.lz4-dtb" ]] || die "build did not produce $DIST/Image.lz4-dtb"
+[[ -f "$DIST/Image.lz4" ]] || die "build did not produce $DIST/Image.lz4"
 [[ -f "$DIST/vmlinux" ]] || die "build did not produce $DIST/vmlinux"
 PROOF="$DIST/ksu-next-susfs-build-proof.txt"
 {
@@ -135,7 +156,7 @@ PROOF="$DIST/ksu-next-susfs-build-proof.txt"
   echo "common_commit=$(git -C "$COMMON" rev-parse HEAD)"
   echo "susfs_repo=$SUSFS_REPO"; echo "susfs_branch=$SUSFS_BRANCH"; echo "susfs_commit=$SUSFS_HEAD"
   echo "ksun_repo=$KSUN_REPO"; echo "ksun_branch=$KSUN_BRANCH"; echo "ksun_commit=$KSUN_HEAD"
-  echo "image_lz4_dtb_sha256=$(sha256sum "$DIST/Image.lz4-dtb" | awk '{print $1}')"
+  echo "image_lz4_sha256=$(sha256sum "$DIST/Image.lz4" | awk '{print $1}')"
   echo "vmlinux_sha256=$(sha256sum "$DIST/vmlinux" | awk '{print $1}')"
 } > "$PROOF"
 echo "Build completed: $DIST"
