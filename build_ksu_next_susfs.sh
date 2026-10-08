@@ -12,22 +12,43 @@ source "$VERSIONS_FILE"
 KERNEL_CHECKOUT="${KERNEL_CHECKOUT:-$(pwd -P)}"
 DIST="${DIST:-}"
 GOOGLE_BASE_COMMIT="${GOOGLE_BASE_COMMIT:-}"
+RESET_REPO="${RESET_REPO:-1}"
+SYNC_REPO="${SYNC_REPO:-1}"
+CLEAN_OUTPUT="${CLEAN_OUTPUT:-1}"
 usage() {
   cat <<'EOF'
 Usage: ./build_ksu_next_susfs.sh [options]
 
 Options:
   --kernel-checkout PATH
-                       repo checkout containing common/, build/, and tools/bazel
-                       (default: current directory or $KERNEL_CHECKOUT)
+                        repo checkout containing common/, build/, and tools/bazel
+                        (default: current directory or $KERNEL_CHECKOUT)
   --dist PATH         Kleaf dist directory (default: $DIST)
+  --reset-repo        reset manifest project worktrees (default)
+  --no-reset-repo     preserve manifest project worktrees
+  --sync-repo         run 'repo sync -l -d' after reset (default)
+  --no-sync-repo      do not synchronize manifest projects
+  --clean-output      remove the canonical generated output directory (default)
+  --keep-output       preserve the canonical generated output directory
   -h, --help          show this help
+
+Environment defaults:
+  RESET_REPO=1 SYNC_REPO=1 CLEAN_OUTPUT=1
+
+The reset and output-clean steps are destructive. Disable them explicitly
+when local source or generated output must be preserved.
 EOF
 }
 while (($#)); do
   case "$1" in
     --kernel-checkout) (($# >= 2)) || die '--kernel-checkout requires a path'; KERNEL_CHECKOUT="$2"; shift 2 ;;
     --dist) (($# >= 2)) || die '--dist requires a path'; DIST="$2"; shift 2 ;;
+    --reset-repo) RESET_REPO=1; shift ;;
+    --no-reset-repo) RESET_REPO=0; shift ;;
+    --sync-repo) SYNC_REPO=1; shift ;;
+    --no-sync-repo) SYNC_REPO=0; shift ;;
+    --clean-output) CLEAN_OUTPUT=1; shift ;;
+    --keep-output) CLEAN_OUTPUT=0; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1" ;;
   esac
@@ -36,24 +57,48 @@ KERNEL_CHECKOUT="$(cd "$KERNEL_CHECKOUT" && pwd -P)" || die "kernel checkout not
 COMMON="$KERNEL_CHECKOUT/common"
 DIST="${DIST:-$KERNEL_CHECKOUT/out/android-msm-cheetah-6.1}"
 [[ "$DIST" = /* ]] || DIST="$KERNEL_CHECKOUT/$DIST"
+BUILD_OUTPUT="$KERNEL_CHECKOUT/out/android-msm-cheetah-6.1"
 SUSFS="$KERNEL_CHECKOUT/susfs4ksu"
 KSUN="$KERNEL_CHECKOUT/KernelSU-Next"
 for command in git patch sed sha256sum awk grep mktemp mv; do command -v "$command" >/dev/null || die "required command not found: $command"; done
+for value_name in RESET_REPO SYNC_REPO CLEAN_OUTPUT; do
+  value="${!value_name}"
+  case "$value" in 0|1) ;; *) die "$value_name must be 0 or 1 (got: $value)" ;; esac
+done
+if [[ "$RESET_REPO" == 1 || "$SYNC_REPO" == 1 ]]; then
+  command -v repo >/dev/null 2>&1 || die 'repo command not found; use --no-reset-repo --no-sync-repo or install repo.'
+  [[ -d "$KERNEL_CHECKOUT/.repo" ]] || die "repo metadata not found: $KERNEL_CHECKOUT/.repo"
+  if [[ "$RESET_REPO" == 1 ]]; then
+    echo '== 0/6: reset repo projects =='
+    (cd "$KERNEL_CHECKOUT" && repo forall -c 'git reset --hard && git clean -fd')
+  fi
+  if [[ "$SYNC_REPO" == 1 ]]; then
+    echo '== 0/6: sync repo projects =='
+    (cd "$KERNEL_CHECKOUT" && repo sync -l -d)
+  fi
+fi
+if [[ "$CLEAN_OUTPUT" == 1 ]]; then
+  [[ "$BUILD_OUTPUT" == "$KERNEL_CHECKOUT/out/android-msm-cheetah-6.1" ]] || die 'refusing an unexpected output path.'
+  echo "== 0/6: remove generated output: $BUILD_OUTPUT =="
+  rm -rf -- "$BUILD_OUTPUT"
+fi
 [[ -d "$COMMON/.git" && -x "$KERNEL_CHECKOUT/tools/bazel" ]] || die 'kernel checkout must contain common/.git and tools/bazel'
 [[ -f "$COMMON/BUILD.bazel" && -f "$COMMON/Makefile" ]] || die 'common source files not found'
 COMMON_HEAD="$(git -C "$COMMON" rev-parse HEAD)"
 [[ -n "$GOOGLE_BASE_COMMIT" ]] || die 'GOOGLE_BASE_COMMIT is empty in config/versions.env; match adb shell uname -r and set it before building'
 COMMON_EXPECTED="$(git -C "$COMMON" rev-parse --verify "${GOOGLE_BASE_COMMIT}^{commit}")" || die "Google base commit is unavailable: $GOOGLE_BASE_COMMIT"
-[[ "$COMMON_HEAD" == "$COMMON_EXPECTED" ]] || die "common HEAD ($COMMON_HEAD) does not match GOOGLE_BASE_COMMIT ($COMMON_EXPECTED)"
 if [[ -n "$(git -C "$COMMON" status --porcelain --untracked-files=all)" ]] || [[ -n "$(git -C "$COMMON" clean -ndx)" ]]; then
   git -C "$COMMON" status --short --untracked-files=all >&2
   git -C "$COMMON" clean -ndx >&2
-  die 'common is not completely clean; reset it and run git clean -fdx before building'
+  die 'common is not completely clean; use the default reset or clean it before building'
 fi
+git -C "$COMMON" checkout -B cheetah-build "$COMMON_EXPECTED"
+COMMON_HEAD="$(git -C "$COMMON" rev-parse HEAD)"
+[[ "$COMMON_HEAD" == "$COMMON_EXPECTED" ]] || die "common HEAD ($COMMON_HEAD) does not match GOOGLE_BASE_COMMIT ($COMMON_EXPECTED)"
 clone_or_update() {
   local dir="$1" url="$2" branch="$3" expected="${4:-}" base_branch="${5:-}"
-  local -a fetch_refs=("refs/heads/$branch:refs/remotes/origin/$branch")
-  [[ -n "$base_branch" ]] && fetch_refs+=("refs/heads/$base_branch:refs/remotes/origin/$base_branch")
+  local -a fetch_refs=("+refs/heads/$branch:refs/remotes/origin/$branch")
+  [[ -n "$base_branch" ]] && fetch_refs+=("+refs/heads/$base_branch:refs/remotes/origin/$base_branch")
   if [[ -e "$dir" && ! -d "$dir/.git" ]]; then die "$dir exists but is not a git clone"; fi
   if [[ -d "$dir/.git" ]]; then
     [[ "$(git -C "$dir" config --get remote.origin.url)" == "$url" ]] || die "$dir origin does not match configured repository"
@@ -91,11 +136,6 @@ PATCH_TMP="$(mktemp)"
 trap 'rm -f "$PATCH_TMP"' EXIT
 cp -p "$SUSFS_PATCH" "$PATCH_TMP"
 SUSFS_PATCH="$PATCH_TMP"
-case "$COMMON_EXPECTED:$SUSFS_HEAD" in
-  2ec90535fa348d27c0a545b05c3badc7fa8ecf68:3e24564bf76999359b832633beda6f1e69f8c11c)
-    sed -i "562s/@@ -32,10 +32,20 @@/@@ -32,11 +32,21 @@/;572i\\ #include <trace/hooks/blk.h>" "$SUSFS_PATCH"
-    ;;
-esac
 if patch --batch --fuzz=0 --forward --dry-run -d "$COMMON" -p1 < "$SUSFS_PATCH" >/dev/null 2>&1; then
   patch --batch --fuzz=0 --no-backup-if-mismatch --forward -d "$COMMON" -p1 < "$SUSFS_PATCH" >/dev/null || die 'SuSFS patch failed'
 elif patch --batch --fuzz=0 --reverse --dry-run -d "$COMMON" -p1 < "$SUSFS_PATCH" >/dev/null 2>&1; then
@@ -156,6 +196,7 @@ PROOF="$DIST/ksu-next-susfs-build-proof.txt"
   echo "common_commit=$(git -C "$COMMON" rev-parse HEAD)"
   echo "susfs_repo=$SUSFS_REPO"; echo "susfs_branch=$SUSFS_BRANCH"; echo "susfs_commit=$SUSFS_HEAD"
   echo "ksun_repo=$KSUN_REPO"; echo "ksun_branch=$KSUN_BRANCH"; echo "ksun_commit=$KSUN_HEAD"
+  echo "reset_repo=$RESET_REPO"; echo "sync_repo=$SYNC_REPO"; echo "clean_output=$CLEAN_OUTPUT"
   echo "image_lz4_sha256=$(sha256sum "$DIST/Image.lz4" | awk '{print $1}')"
   echo "vmlinux_sha256=$(sha256sum "$DIST/vmlinux" | awk '{print $1}')"
 } > "$PROOF"

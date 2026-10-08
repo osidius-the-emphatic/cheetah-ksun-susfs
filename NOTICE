@@ -20,7 +20,7 @@ KernelSU-Next and SuSFS
 
 build_ksu_next_susfs.sh obtains KernelSU-Next from
 https://github.com/pershoot/KernelSU-Next , branch dev-susfs, and SuSFS from
-https://gitlab.com/pershoot/susfs4ksu , branch gki-android14-6.1-dev. The
+https://gitlab.com/pershoot/susfs4ksu , branch gki-android14-6.1-lts-dev. The
 selected commits are recorded in the build proof and can be pinned in
 config/versions.env after a reviewed successful build. Preserve their
 upstream copyright notices and licenses when redistributing derived material.

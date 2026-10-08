@@ -14,7 +14,7 @@ The scripts prepare source and images but do **not** flash the phone. Run the bu
 - Build host: WSL/Linux.
 - Bootloader: unlocked for device testing.
 - KernelSU-Next: pershoot/KernelSU-Next, branch `dev-susfs`.
-- SuSFS: pershoot/susfs4ksu, branch `gki-android14-6.1-dev`.
+- SuSFS: pershoot/susfs4ksu, branch `gki-android14-6.1-lts-dev`.
 
 This workflow uses built-in KernelSU-Next. init_boot.img is not patched by the package script. If the phone currently uses an LKM-patched init_boot, restore the matching stock image before testing.
 
@@ -104,22 +104,15 @@ git clone https://github.com/osidius-the-emphatic/cheetah-ksun-susfs.git ksun-su
 ### Existing checkout: repeat a build
 
 The path assignments at the start of this section are required in a new shell.
-The following clean-repeat procedure intentionally discards the previous local
-integration and all other tracked, untracked, and ignored changes in manifest
-projects. Preserve unrelated work first:
-
-```bash
-cd "$KERNEL_CHECKOUT"
-repo forall -c 'git reset --hard && git clean -fdx'
-repo sync -l -d
-rm -rf "$KERNEL_CHECKOUT/out/android-msm-cheetah-6.1"
-rm -rf "$KERNEL_CHECKOUT/susfs4ksu" "$KERNEL_CHECKOUT/KernelSU-Next"
-```
-
-`repo sync -l -d` does not download new objects and deliberately returns
-`common/` to the manifest revision. Continue with sections 4 and 5 below.
-Section 5 is the single complete procedure that identifies the device release,
-records `GOOGLE_BASE_COMMIT`, and checks out that exact commit in `common/`.
+After the one-time `repo init`, initial `repo sync`, and project clone, a normal
+repeat build needs only the build command in section 6 from the checkout root.
+By default, the builder resets manifest project worktrees with
+`git reset --hard` and `git clean -fd`, runs `repo sync -l -d`, removes only
+`out/android-msm-cheetah-6.1`, and checks out the configured Google base commit
+in `common/`. Preserve unrelated work before running it: the default reset and
+output cleanup are destructive. Use `--no-reset-repo --no-sync-repo` and/or
+`--keep-output` only when deliberately preserving local source or generated
+output. Do not run a separate manual cleanup before each ordinary build.
 
 ## 4. Place the stock images
 
@@ -146,8 +139,9 @@ All tests must return status 0. The package stage requires only boot.img; the ot
 
 ## 5. Identify and pin the Google base
 
-Run this section after either a new checkout or the repeat-build cleanup above.
-It is the only step that selects the `common/` commit used by the build.
+Run this section after a new checkout or when deliberately moving to a different
+device release. Ordinary repeat builds do not require it. It is the only step
+that selects the `common/` commit used by the build.
 
 First record the release running on the phone:
 
@@ -167,13 +161,15 @@ strings kernel | grep -m1 "Linux version"
 ```
 
 Use the `-g` suffix from the release string to identify the Google source
-commit. This guide is pinned to the Pixel 7 Pro base
-`2ec90535fa348d27c0a545b05c3badc7fa8ecf68`. The command below writes that
+commit. This guide is pinned to factory release `CP3A.261005.002.A1`, whose
+Pixel 7 Pro kernel reports `6.1.162-android14-11-g9dd05ae3a1de-ab16261587`.
+The corresponding full Google base is
+`9dd05ae3a1de70a3b231f48aee1f20aad654bd7b`. The command below writes that
 exact value to the project's configuration and then verifies that the object
 is available locally:
 
 ```bash
-GOOGLE_BASE_COMMIT=2ec90535fa348d27c0a545b05c3badc7fa8ecf68
+GOOGLE_BASE_COMMIT=9dd05ae3a1de70a3b231f48aee1f20aad654bd7b
 sed -i "s/^GOOGLE_BASE_COMMIT=.*/GOOGLE_BASE_COMMIT=$GOOGLE_BASE_COMMIT/" \
   "$KERNEL_CHECKOUT/ksun-susfs/config/versions.env"
 cd "$KERNEL_CHECKOUT/common"
@@ -190,15 +186,19 @@ cd "$KERNEL_CHECKOUT/common"
 git rev-parse --verify "${GOOGLE_BASE_COMMIT}^{commit}"
 ```
 
-After the object is available, create or move the local working branch to the
-configured full SHA:
+If the object is still unavailable, the manifest revision does not carry this
+factory commit through its ordinary project ref. Fetch the pinned object
+directly into a persistent local remote-tracking ref, then verify it:
 
 ```bash
-cd "$KERNEL_CHECKOUT/common"
-git checkout -B cheetah-build "$GOOGLE_BASE_COMMIT"
-git rev-parse HEAD
-git status --short
+git -C "$KERNEL_CHECKOUT/common" fetch --no-tags aosp \
+  "$GOOGLE_BASE_COMMIT:refs/remotes/aosp/cheetah-factory-20261005"
+git -C "$KERNEL_CHECKOUT/common" rev-parse --verify "${GOOGLE_BASE_COMMIT}^{commit}"
 ```
+
+After the object is available, do not manually create or move the local working
+branch for a normal build. The builder checks out `cheetah-build` at the
+configured full SHA after its default local reset and sync.
 
 Finally confirm that `$KERNEL_CHECKOUT/common`, `$KERNEL_CHECKOUT/build`, and
 `$KERNEL_CHECKOUT/tools/bazel` exist.
@@ -212,8 +212,8 @@ This is the long-running step. The script always reads the adjacent
 not a command-line option. It identifies the exact Google `common/` commit
 whose source matches the kernel release in the corresponding stock `boot.img`.
 Before changing source files, the script requires this value, resolves it to a
-commit, and verifies that `common/HEAD` is exactly the same commit. This stops
-the integration from being applied to an arbitrary revision of the moving
+commit, and checks out `common/` at that exact commit. This stops the
+integration from being applied to an arbitrary revision of the moving
 `common-android14-6.1` branch. Determine it from the release string obtained
 with `adb shell uname -r` or from the stock `boot.img`, then record the full SHA
 in `config/versions.env`. It cannot be overridden by an option or environment
@@ -229,7 +229,10 @@ read from the directory containing the script.
 | --- | --- | --- | --- |
 | Google checkout | `KERNEL_CHECKOUT` | `--kernel-checkout PATH` | Current directory |
 | Kleaf results | `DIST` | `--dist PATH` | `$KERNEL_CHECKOUT/out/android-msm-cheetah-6.1` |
-| Required base revision | None; set in `config/versions.env` | None | No default; the script stops if `GOOGLE_BASE_COMMIT` is empty or does not match `common/HEAD`. |
+| Reset manifest projects | `RESET_REPO` | `--reset-repo` / `--no-reset-repo` | `1` |
+| Local manifest sync | `SYNC_REPO` | `--sync-repo` / `--no-sync-repo` | `1` |
+| Clean canonical build output | `CLEAN_OUTPUT` | `--clean-output` / `--keep-output` | `1` |
+| Required base revision | None; set in `config/versions.env` | None | No default; the script stops if `GOOGLE_BASE_COMMIT` is empty or unavailable locally. |
 
 Use `--help` to print the syntax:
 
@@ -240,7 +243,7 @@ bash ./ksun-susfs/build_ksu_next_susfs.sh --help
 It uses `SUSFS_REPO`, `SUSFS_BRANCH`, `KSUN_REPO`, and `KSUN_BRANCH` from that
 file to fetch the configured branches. When `SUSFS_EXPECTED_COMMIT` or
 `KSUN_EXPECTED_COMMIT` is set, the script verifies that the commit belongs to
-the configured branch and checks out that exact commit in detached HEAD. When
+the configured branch and checks out that exact commit on a local branch. When
 the value is empty, it uses the current branch tip. `GOOGLE_BASE_COMMIT` is already matched to the boot image's
 kernel payload named above. For another device image, verify its `adb shell uname -r` suffix
 before the build. If it differs, stop; do not substitute a different Google
@@ -259,11 +262,13 @@ cd "$KERNEL_CHECKOUT"
 bash ./ksun-susfs/build_ksu_next_susfs.sh
 ```
 
-The script reads `KERNEL_CHECKOUT` (or uses the current directory), requires
-`GOOGLE_BASE_COMMIT`, rejects a `common/` tree with tracked, untracked, or
-ignored files, verifies that HEAD equals `GOOGLE_BASE_COMMIT`, and creates the
-integration commit itself. If that commit fails, the script stops before Kleaf. Afterward
-verify that `common/` is clean:
+The default invocation resets and locally synchronizes the initialized `repo`
+checkout, removes the canonical output directory, requires `GOOGLE_BASE_COMMIT`,
+and checks out `common/` on `cheetah-build` at that commit. It then requires a
+completely clean `common/` tree and creates the integration commit itself. If
+that commit fails, the script stops before Kleaf. The default reset and output
+cleanup discard local work; use the opt-out flags above only when that work must
+be retained. Afterward verify that `common/` is clean:
 
 ```bash
 git -C "$KERNEL_CHECKOUT/common" status --short
@@ -374,6 +379,13 @@ guarantee.
 
 Install one official KernelSU-Next Manager APK from the
 [official releases](https://github.com/KernelSU-Next/KernelSU-Next/releases).
+The known-working KernelSU-Next build in this project used spoofed Manager
+`33294-4`, a CI/nightly artifact from the official
+[GitHub Actions](https://github.com/KernelSU-Next/KernelSU-Next/actions), not a
+GitHub Release asset. Download it from the matching workflow run and verify
+the displayed version and UAPI compatibility before installing it. The
+current pins have passed the clean build and package stages; boot behavior for
+this revision still requires device testing.
 The ordinary and spoofed variants are both supported by the upstream manager
 list. Do not install both at the same time. Prefer a Manager release close to
 the kernel source revision; displayed version numbers need not equal the git
@@ -414,7 +426,8 @@ If AVB metadata was changed separately, restore matching stock vbmeta images usi
 ## 13. Updating KernelSU-Next or SuSFS
 
 1. Change one component at a time in config/versions.env.
-2. Clean common/ and remove the old local component clone.
+2. Preserve any unrelated local work; the default builder reset, local sync,
+   and canonical-output cleanup prepare the next build.
 3. Review `config/versions.env` and run bash -n on both scripts.
 4. Perform a clean build and inspect the new proof.
 5. Package only after the build is successful.
@@ -442,7 +455,7 @@ clean build with its proof.
 
 | Symptom | Likely cause | Safe response |
 | --- | --- | --- |
-| The script refuses the checkout | `--kernel-checkout` is wrong, required checkout files are absent, `GOOGLE_BASE_COMMIT` does not match HEAD, or `common/` is not completely clean. | Use an absolute path; confirm `common/.git`, `common/BUILD.bazel`, `tools/bazel`, and the commit in `config/versions.env`. Preserve unrelated work, then reset `common/` and run `git clean -fdx` before retrying. |
+| The script refuses the checkout | `--kernel-checkout` is wrong, required checkout files are absent, the configured Google commit is unavailable, or reset was disabled while `common/` is not completely clean. | Use an absolute path; confirm `common/.git`, `common/BUILD.bazel`, `tools/bazel`, and the commit in `config/versions.env`. Preserve unrelated work, then use the default reset/sync or clean `common/` manually before retrying. |
 | The SuSFS patch does not apply | The `common/` revision and `SUSFS_BRANCH` do not match the version-specific patch. | Stop. Verify the pinned source revision and upstream branch; inspect the patch and source diff. Do not use fuzz or force a partial patch. |
 | `CONFIG_KSU_SUSFS` is not found | The clone is not pershoot/KernelSU-Next `dev-susfs`, or that branch changed its layout. | Check the remote URL, checked-out revision, and `kernel/Kconfig` before changing integration logic. |
 | Kleaf does not produce `Image.lz4` | Bazel failed, resources are insufficient, or the manifest/source revision is inconsistent. | Inspect Bazel output, free disk space, WSL memory, and the selected source revision. Do not package without both artifacts and proof. |

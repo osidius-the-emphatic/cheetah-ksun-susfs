@@ -5,7 +5,7 @@
 This repository contains a reproducible, patch-based workflow for building an
 Android 14 / Linux 6.1 GKI kernel for Google Pixel 7 Pro (`cheetah`). The
 result integrates pershoot's `dev-susfs` KernelSU-Next branch and
-`gki-android14-6.1-dev` SuSFS branch while keeping the source and upstream
+`gki-android14-6.1-lts-dev` SuSFS branch while keeping the source and upstream
 revisions reviewable.
 
 ## Purpose
@@ -24,7 +24,7 @@ the source tree.
 
 - **Google kernel manifest:** [kernel/manifest](https://android.googlesource.com/kernel/manifest), branch `common-android14-6.1`; the device-specific source is the `common/` project in the checkout.
 - **KernelSU-Next:** [pershoot/KernelSU-Next](https://github.com/pershoot/KernelSU-Next), branch `dev-susfs`.
-- **SuSFS:** [pershoot/susfs4ksu](https://gitlab.com/pershoot/susfs4ksu), branch `gki-android14-6.1-dev`.
+- **SuSFS:** [pershoot/susfs4ksu](https://gitlab.com/pershoot/susfs4ksu), branch `gki-android14-6.1-lts-dev`.
 
 The exact branch names and optional commit pins are stored in
 `config/versions.env`. The SuSFS patch is taken from the checked-out upstream
@@ -46,7 +46,7 @@ terms. See [LICENSE](LICENSE) for scope and [NOTICE](NOTICE) for provenance.
 
 ## Outputs
 
-The build script writes `Image.lz4-dtb`, `vmlinux`, and
+The build script writes `Image.lz4`, `vmlinux`, and
 `ksu-next-susfs-build-proof.txt` to the selected dist directory. The proof
 records the Google checkout commit, both integration source commits, and
 SHA-256 hashes of the kernel artifacts.
@@ -57,8 +57,8 @@ The package script creates a new directory below `repacked-images/` containing
 
 ## Workflow
 
-1. Prepare the Google checkout and matching stock images.
-2. Run `build_ksu_next_susfs.sh` and review the proof file.
+1. One time: prepare the Google checkout and matching stock images.
+2. From the checkout root, run `build_ksu_next_susfs.sh` and review the proof file. By default it resets and locally synchronizes the initialized `repo` checkout, removes the canonical build output, and checks out the configured Google base commit; preserve unrelated work first.
 3. Run `package_kernel_image.sh` only after the build succeeds.
 4. Test the generated image with `fastboot boot`.
 5. Flash manually only after a stable test; keep stock `boot.img` and
